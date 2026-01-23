@@ -1,0 +1,117 @@
+II. CHI TIẾT CÔNG NGHỆ 
+Sinh viên đánh dấu [x] vào ô chọn và điền thông tin chi tiết.
+
+1. Nền tảng phát triển (Platform):
+[x] Website
+[ ] Mobile App (Android/iOS)
+[ ] Cross-platform (Web + App)
+
+2. Ngôn ngữ & Framework Front-end (Giao diện):
+[ ] HTML/CSS/JS Thuần (Vanilla)
+[x] ReactJS
+[ ] VueJS
+[ ] Angular
+[ ] Flutter / React Native (Mobile)
+[ ] Template Engine (Blade/Thymeleaf/JSP...)
+[ ] Khác: Next.js 14 (App Router)
+
+Thư viện CSS sử dụng: [ ] Bootstrap [x] Tailwind [ ] AntDesign [ ] Khác: Framer Motion
+
+3. Ngôn ngữ & Framework Back-end (Xử lý):
+[ ] PHP (Laravel)
+[x] NodeJS (ExpressJS / NestJS)
+[ ] Java (Spring Boot / Servlet)
+[ ] C# (.NET Core / ASP.NET)
+[ ] Python (Django / Flask)
+[ ] Khác: Next.js API Routes + Supabase
+
+4. Hệ quản trị Cơ sở dữ liệu (DBMS):
+[ ] MySQL / MariaDB
+[ ] SQL Server
+[x] PostgreSQL
+[ ] MongoDB (NoSQL)
+[ ] Firebase (Realtime DB)
+
+Ghi chú: Sử dụng Supabase (PostgreSQL + Storage) và Blockchain Base Sepolia
+
+================================================================================
+
+III. CẤU TRÚC HỆ THỐNG
+
+1. Mô hình kiến trúc:
+[x] MVC (Model-View-Controller) - Bắt buộc
+[ ] Microservices (Khuyến khích nếu đủ khả năng)
+
+Ghi chú: Kiến trúc Full-stack Next.js với App Router + API Routes
+
+2. Thiết kế Database (Tối thiểu 8 bảng):
+Liệt kê tên các bảng (Tables/Collections) chính dự kiến:
+
+1. users                          5. nft_listings
+2. posts                          6. transactions  
+3. comments                       7. notifications
+4. nfts                           8. messages
+
+Ghi chú bổ sung: 
+- users: Thông tin người dùng (wallet address, role, profile)
+- posts: Bài đăng của người dùng
+- comments: Bình luận trên bài đăng
+- nfts: Metadata NFT đã mint
+- nft_listings: NFT đang được bán trên marketplace
+- transactions: Lịch sử giao dịch mua/bán NFT
+- notifications: Thông báo cho người dùng
+- messages: Tin nhắn giữa các người dùng
+
+3. Phân hệ chức năng (Tối thiểu 10 chức năng/site):
+
+●  Site Admin:
+   ○ Dashboard thống kê (số user, post, NFT, giao dịch)
+   ○ Quản lý người dùng (xem, suspend, delete)
+   ○ Quản lý bài đăng (duyệt, xóa vi phạm)
+   ○ Quản lý báo cáo vi phạm
+   ○ Cài đặt hệ thống
+
+●  Site Public/User:
+   ○ Đăng nhập/Đăng ký bằng Wallet (Dynamic Labs)
+   ○ Xem feed bài đăng (Home)
+   ○ Tạo bài đăng mới
+   ○ Mint NFT từ bài đăng
+   ○ Marketplace (mua/bán NFT)
+   ○ Xem profile người dùng
+   ○ Nhắn tin giữa người dùng
+   ○ Bình luận, tương tác bài đăng
+   ○ Tìm kiếm (Discover)
+   ○ Quản lý thông báo
+   ○ Cài đặt profile cá nhân
+
+4. Tính năng nâng cao (Điểm cộng):
+[x] Triển khai lên Hosting/VPS thực tế (Có domain)
+    → Vercel: metabased.vercel.app
+[x] Xây dựng RESTful API (Tối thiểu 10 endpoints)
+    → API Routes:
+       1. POST /api/auth/verify - Xác thực JWT
+       2. GET  /api/auth/role - Lấy role user
+       3. GET  /api/posts - Lấy danh sách bài đăng
+       4. POST /api/posts - Tạo bài đăng mới
+       5. GET  /api/posts/[postId] - Chi tiết bài đăng
+       6. DELETE /api/posts/[postId] - Xóa bài đăng
+       7. POST /api/comments - Tạo bình luận
+       8. POST /api/nft/mint - Mint NFT
+       9. GET  /api/nft/metadata - Lấy metadata NFT
+       10. POST /api/marketplace/list - Đăng bán NFT
+       11. POST /api/marketplace/buy - Mua NFT
+       12. GET  /api/admin/users - Quản lý users (Admin)
+       13. GET  /api/admin/stats - Thống kê (Admin)
+[x] Tích hợp thanh toán online (Momo/VNPay/Stripe sandbox)
+    → Tích hợp thanh toán bằng Cryptocurrency trên Base Sepolia (ETH testnet)
+    → Smart Contracts: NFT721, NFT1155, Marketplace
+
+================================================================================
+
+CÔNG NGHỆ BỔ SUNG:
+- Authentication: Dynamic Labs (Web3 Wallet Login)
+- Blockchain: Base Sepolia Testnet
+- Smart Contracts: Solidity (NFT721, NFT1155, Marketplace)
+- Storage: Supabase Storage (images, NFT metadata)
+- State Management: React Hooks
+- UI Library: Lucide React (icons), Framer Motion (animations)
