@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
+import { isDefaultAvatar } from '@/lib/avatar-utils';
 
 interface AvatarProps {
   src?: string | null;
@@ -26,6 +27,8 @@ const Avatar = ({ src, alt = 'Avatar', size = 'md', className }: AvatarProps) =>
     .toUpperCase()
     .slice(0, 2);
 
+  const isLocalAvatar = isDefaultAvatar(src);
+
   return (
     <div
       className={cn(
@@ -40,6 +43,7 @@ const Avatar = ({ src, alt = 'Avatar', size = 'md', className }: AvatarProps) =>
           alt={alt}
           fill
           className="object-cover"
+          unoptimized={isLocalAvatar}
         />
       ) : (
         <span className="text-white font-semibold text-xs">

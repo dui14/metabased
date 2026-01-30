@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { query as dbQuery } from '@/lib/db';
+import { getRandomAvatarName } from '@/lib/avatar-utils';
 
 const USE_LOCAL_DB = process.env.USE_LOCAL_DB === 'true';
 
@@ -162,12 +163,13 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Tạo user mới
+        // Tạo user mới với random avatar
+        const randomAvatar = `/avatars/${getRandomAvatarName()}`;
         const insertResult = await dbQuery(
-          `INSERT INTO users (wallet_address, email, is_profile_complete, role, status)
-           VALUES ($1, $2, false, 'user', 'active')
+          `INSERT INTO users (wallet_address, email, avatar_url, is_profile_complete, role, status)
+           VALUES ($1, $2, $3, false, 'user', 'active')
            RETURNING *`,
-          [wallet_address?.toLowerCase() || null, email?.toLowerCase() || null]
+          [wallet_address?.toLowerCase() || null, email?.toLowerCase() || null, randomAvatar]
         );
         const newUser = insertResult.rows[0];
 
@@ -242,12 +244,14 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Tạo user mới
+      // Tạo user mới với random avatar
+      const randomAvatar = `/avatars/${getRandomAvatarName()}`;
       const { data: newUser, error } = await supabase
         .from('users')
         .insert({
           wallet_address: wallet_address?.toLowerCase() || null,
           email: email?.toLowerCase() || null,
+          avatar_url: randomAvatar,
           is_profile_complete: false,
           role: 'user',
           status: 'active',

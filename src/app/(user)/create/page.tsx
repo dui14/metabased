@@ -115,8 +115,8 @@ export default function CreatePostPage() {
         throw new Error(data.error || 'Failed to create post');
       }
 
-      // Redirect to the new post
-      router.push(`/post/${data.post.id}`);
+      router.push(`/post/${data.post.id}?noCache=true`);
+      router.refresh();
     } catch (err) {
       console.error('Error creating post:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');

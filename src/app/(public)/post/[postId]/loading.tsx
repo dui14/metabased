@@ -4,7 +4,7 @@ export default function PostLoading() {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-2xl mx-auto px-4 py-6">
-        {/* Back Button Skeleton */}
+        Back Button Skeleton
         <div className="w-24 h-5 bg-gray-100 rounded animate-pulse mb-4" />
 
         {/* Image Skeleton */}

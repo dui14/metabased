@@ -15,24 +15,35 @@ export default function HomePage() {
   const [trendingUsers, setTrendingUsers] = useState<Array<{ id: string; username: string; display_name: string; followers_count: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch posts từ Supabase
-  useEffect(() => {
-    const fetchPosts = async () => {
-      try {
-        const response = await fetch('/api/posts');
-        if (response.ok) {
-          const data = await response.json();
-          setPosts(data.posts || []);
-        }
-      } catch (error) {
-        console.error('Error fetching posts:', error);
-      } finally {
-        setIsLoading(false);
+  const fetchPosts = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/posts?noCache=true', {
+        cache: 'no-store',
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setPosts(data.posts || []);
       }
-    };
+    } catch (error) {
+      console.error('Error fetching posts:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchPosts();
   }, []);
+
+  const handlePostUpdate = (updatedPost: Post) => {
+    setPosts(posts.map(p => p.id === updatedPost.id ? updatedPost : p));
+  };
+
+  const handlePostDelete = async (postId: string) => {
+    setPosts(posts.filter(p => p.id !== postId));
+    await fetchPosts();
+  };
 
   // Fetch trending users từ Supabase
   useEffect(() => {
@@ -105,7 +116,7 @@ export default function HomePage() {
               {trendingUsers.map((trendingUser) => (
                 <Link 
                   key={trendingUser.id} 
-                  href={`/profile/${trendingUser.username}`}
+                  href={`/user/${trendingUser.username}`}
                   className="flex items-center justify-between hover:bg-gray-50 rounded-xl p-2 -mx-2 transition-colors"
                 >
                   <div className="flex items-center gap-3">
@@ -132,7 +143,12 @@ export default function HomePage() {
             </div>
           ) : posts.length > 0 ? (
             posts.map((post) => (
-              <PostCard key={post.id} post={post} />
+              <PostCard 
+                key={post.id} 
+                post={post} 
+                onUpdate={handlePostUpdate}
+                onDelete={handlePostDelete}
+              />
             ))
           ) : (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-soft p-8 text-center">

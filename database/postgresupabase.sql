@@ -1,15 +1,9 @@
--- ============================================
 -- METABASED - PostgreSQL Schema for Supabase
--- Social NFT Marketplace on Base Sepolia
--- ============================================
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ============================================
 -- 1. USERS TABLE
--- Lưu thông tin người dùng
--- ============================================
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     wallet_address VARCHAR(42) UNIQUE NOT NULL,
@@ -23,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     following_count INTEGER DEFAULT 0,
     is_profile_complete BOOLEAN DEFAULT false,
     email VARCHAR(255),
+    message_permission VARCHAR(20) DEFAULT 'everyone' CHECK (message_permission IN ('everyone', 'following')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -32,12 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 
--- ============================================
 -- 2. POSTS TABLE
--- Lưu bài đăng của người dùng
--- ============================================
--- NOTE: Nếu đang có NOT NULL constraint trên image_url, chạy lệnh này:
--- ALTER TABLE posts ALTER COLUMN image_url DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS posts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -54,7 +44,6 @@ CREATE TABLE IF NOT EXISTS posts (
     visibility VARCHAR(20) DEFAULT 'public' CHECK (visibility IN ('public', 'private', 'followers')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    -- Đảm bảo ít nhất 1 trong 2 trường phải có giá trị
     CONSTRAINT posts_content_check CHECK (image_url IS NOT NULL OR caption IS NOT NULL)
 );
 
@@ -63,10 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_user ON posts(user_id);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_nft ON posts(is_nft) WHERE is_nft = true;
 
--- ============================================
 -- 3. COMMENTS TABLE
--- Bình luận trên bài đăng
--- ============================================
 CREATE TABLE IF NOT EXISTS comments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -83,10 +69,8 @@ CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_user ON comments(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
 
--- ============================================
 -- 4. NFTS TABLE
 -- Metadata NFT đã mint
--- ============================================
 CREATE TABLE IF NOT EXISTS nfts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     post_id UUID REFERENCES posts(id) ON DELETE SET NULL,
@@ -111,10 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_nfts_creator ON nfts(creator_id);
 CREATE INDEX IF NOT EXISTS idx_nfts_owner ON nfts(owner_id);
 CREATE INDEX IF NOT EXISTS idx_nfts_token ON nfts(contract_address, token_id);
 
--- ============================================
 -- 5. NFT_LISTINGS TABLE
--- NFT đang được bán trên marketplace
--- ============================================
 CREATE TABLE IF NOT EXISTS nft_listings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nft_id UUID NOT NULL REFERENCES nfts(id) ON DELETE CASCADE,
@@ -135,10 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_listings_nft ON nft_listings(nft_id);
 CREATE INDEX IF NOT EXISTS idx_listings_seller ON nft_listings(seller_id);
 CREATE INDEX IF NOT EXISTS idx_listings_status ON nft_listings(status);
 
--- ============================================
 -- 6. TRANSACTIONS TABLE
--- Lịch sử giao dịch mua/bán NFT
--- ============================================
 CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nft_id UUID REFERENCES nfts(id) ON DELETE SET NULL,
@@ -162,10 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_tx_buyer ON transactions(buyer_id);
 CREATE INDEX IF NOT EXISTS idx_tx_hash ON transactions(tx_hash);
 CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at DESC);
 
--- ============================================
 -- 7. NOTIFICATIONS TABLE
--- Thông báo cho người dùng
--- ============================================
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -184,13 +159,30 @@ CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, is_read) WHERE is_read = false;
 CREATE INDEX IF NOT EXISTS idx_notif_created ON notifications(created_at DESC);
 
--- ============================================
--- 8. MESSAGES TABLE
--- Tin nhắn giữa các người dùng
--- ============================================
+-- 8. CONVERSATIONS TABLE
+CREATE TABLE IF NOT EXISTS conversations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    participant_1_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    participant_2_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_message_id UUID,
+    last_message_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT conversations_unique_pair UNIQUE(participant_1_id, participant_2_id),
+    CONSTRAINT conversations_different_users CHECK (participant_1_id != participant_2_id),
+    CONSTRAINT conversations_ordered_ids CHECK (participant_1_id < participant_2_id)
+);
+
+-- Index cho conversations
+CREATE INDEX IF NOT EXISTS idx_conv_participant1 ON conversations(participant_1_id);
+CREATE INDEX IF NOT EXISTS idx_conv_participant2 ON conversations(participant_2_id);
+CREATE INDEX IF NOT EXISTS idx_conv_last_message ON conversations(last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conv_both_participants ON conversations(participant_1_id, participant_2_id);
+
+-- 9. MESSAGES TABLE
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    conversation_id UUID NOT NULL,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
@@ -205,12 +197,10 @@ CREATE INDEX IF NOT EXISTS idx_msg_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_msg_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_msg_receiver ON messages(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages(receiver_id, is_read) WHERE is_read = false;
+CREATE INDEX IF NOT EXISTS idx_msg_conv_created ON messages(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_msg_conv_unread ON messages(conversation_id, is_read) WHERE is_read = false;
 
--- ============================================
--- ADDITIONAL TABLES
--- ============================================
-
--- 9. FOLLOWS TABLE - Quan hệ follow giữa users
+-- 10. FOLLOWS TABLE - Quan hệ follow giữa users
 CREATE TABLE IF NOT EXISTS follows (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -222,7 +212,7 @@ CREATE TABLE IF NOT EXISTS follows (
 CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
 CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id);
 
--- 10. LIKES TABLE - Likes trên posts
+-- 11. LIKES TABLE
 CREATE TABLE IF NOT EXISTS likes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -234,11 +224,7 @@ CREATE TABLE IF NOT EXISTS likes (
 CREATE INDEX IF NOT EXISTS idx_likes_post ON likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_likes_user ON likes(user_id);
 
--- ============================================
 -- FUNCTIONS & TRIGGERS
--- ============================================
-
--- Function update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -261,6 +247,9 @@ CREATE TRIGGER update_nfts_updated_at BEFORE UPDATE ON nfts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_listings_updated_at BEFORE UPDATE ON nft_listings
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Function tăng/giảm followers_count
@@ -313,9 +302,20 @@ $$ language 'plpgsql';
 CREATE TRIGGER trigger_update_comments_count AFTER INSERT OR DELETE ON comments
     FOR EACH ROW EXECUTE FUNCTION update_comments_count();
 
--- ============================================
--- ROW LEVEL SECURITY (RLS)
--- ============================================
+-- RPC Functions for manual count updates
+CREATE OR REPLACE FUNCTION increment_likes_count(post_id_param UUID)
+RETURNS void AS $$
+BEGIN
+    UPDATE posts SET likes_count = likes_count + 1 WHERE id = post_id_param;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION decrement_likes_count(post_id_param UUID)
+RETURNS void AS $$
+BEGIN
+    UPDATE posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = post_id_param;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Enable RLS
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -325,6 +325,7 @@ ALTER TABLE nfts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nft_listings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
@@ -339,13 +340,8 @@ CREATE POLICY "Users can create posts" ON posts FOR INSERT WITH CHECK (auth.uid(
 CREATE POLICY "Users can update own posts" ON posts FOR UPDATE USING (auth.uid()::text = user_id::text);
 CREATE POLICY "Users can delete own posts" ON posts FOR DELETE USING (auth.uid()::text = user_id::text);
 
--- ============================================
 -- SAMPLE DATA (Optional - for testing)
--- ============================================
-
--- Uncomment để insert dữ liệu mẫu
 /*
 INSERT INTO users (wallet_address, username, display_name, role, is_profile_complete) VALUES
     ('0x1234567890abcdef1234567890abcdef12345678', 'admin_user', 'Admin', 'admin', true),
-    ('0xabcdef1234567890abcdef1234567890abcdef12', 'test_user', 'Test User', 'user', true);
 */

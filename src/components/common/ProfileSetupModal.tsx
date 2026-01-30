@@ -143,6 +143,7 @@ const ProfileSetupModal = ({ isOpen, onComplete, walletAddress }: ProfileSetupMo
                   width={96}
                   height={96}
                   className="w-full h-full object-cover"
+                  unoptimized
                 />
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-primary-400 to-primary-500 flex items-center justify-center">

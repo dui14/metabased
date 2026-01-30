@@ -1,7 +1,3 @@
-/**
- * Avatar utilities
- * Xử lý random avatar cho người dùng mới
- */
 
 // Danh sách avatars có sẵn trong /public/avatars
 export const AVAILABLE_AVATARS = [
@@ -47,9 +43,8 @@ export function getRandomAvatarUrl(): string {
 }
 
 /**
- * Kiểm tra xem một URL có phải là avatar mặc định không
- * @param url - URL cần kiểm tra
- * @returns true nếu là avatar mặc định
+ * @param url 
+ * @returns 
  */
 export function isDefaultAvatar(url?: string | null): boolean {
   if (!url) return true;

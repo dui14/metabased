@@ -2,74 +2,97 @@
 
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import { Avatar, Badge, Button, Card, Input } from '@/components/common';
-import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, ExternalLink, Copy, Check, ArrowLeft } from 'lucide-react';
+import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, ExternalLink, Copy, Check } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/providers';
 import type { Post, Comment } from '@/types';
 
 interface PostDetailProps {
   post: Post;
   comments?: Comment[];
+  onUpdate?: (post: Post) => void;
+  onDelete?: () => void;
 }
 
-const mockComments: Comment[] = [
-  {
-    id: '1',
-    post_id: '1',
-    user_id: '1',
-    content: 'This is absolutely stunning! 🔥',
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    user: { username: 'alex_nft', display_name: 'Alex Thompson' },
-  },
-  {
-    id: '2',
-    post_id: '1',
-    user_id: '2',
-    content: 'Love the colors and composition',
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    user: { username: 'sarah_art', display_name: 'Sarah Miller' },
-  },
-  {
-    id: '3',
-    post_id: '1',
-    user_id: '3',
-    content: 'Already minted! Great work 👏',
-    created_at: new Date(Date.now() - 10800000).toISOString(),
-    user: { username: 'mike_collector', display_name: 'Mike Chen' },
-  },
-];
-
-const PostDetail = ({ post, comments = mockComments }: PostDetailProps) => {
+const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps) => {
   const router = useRouter();
+  const { user } = useAuth();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
   const [newComment, setNewComment] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const handleLike = () => {
-    setIsLiked(!isLiked);
-    setLikesCount(isLiked ? likesCount - 1 : likesCount + 1);
+  useEffect(() => {
+    const checkLikeStatus = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const response = await fetch(`/api/likes?user_id=${user.id}&post_id=${post.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsLiked(data.isLiked);
+        }
+      } catch (error) {
+        console.log('Error checking like status:', error);
+      }
+    };
+
+    checkLikeStatus();
+  }, [user?.id, post.id]);
+
+  const handleLike = async () => {
+    if (!user?.id) {
+      alert('Please login first');
+      return;
+    }
+
+    const newIsLiked = !isLiked;
+    const newLikesCount = newIsLiked ? likesCount + 1 : likesCount - 1;
+    
+    setIsLiked(newIsLiked);
+    setLikesCount(newLikesCount);
+
+    try {
+      const response = await fetch('/api/likes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          post_id: post.id,
+          action: newIsLiked ? 'like' : 'unlike',
+        }),
+      });
+
+      if (!response.ok) {
+        setIsLiked(!newIsLiked);
+        setLikesCount(likesCount);
+        console.log('Failed to like/unlike post');
+      }
+    } catch (error) {
+      setIsLiked(!newIsLiked);
+      setLikesCount(likesCount);
+      console.log('Error liking/unliking post:', error);
+    }
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyToClipboard = async () => {
+    try {
+      const shareUrl = typeof window !== 'undefined' 
+        ? `${window.location.origin}/post/${post.id}`
+        : '';
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.log('Error copying to clipboard:', error);
+    }
   };
 
   return (
     <div className="max-w-2xl mx-auto">
-      {/* Back Button */}
-      <button
-        onClick={() => router.back()}
-        className="inline-flex items-center gap-2 text-gray-500 hover:text-dark dark:hover:text-white mb-4 transition-colors"
-      >
-        <ArrowLeft size={18} />
-        <span className="text-sm font-medium">Back</span>
-      </button>
-
       {/* Main Content */}
       {post.image_url && (
         <Card padding="none" className="overflow-hidden mb-4">
@@ -80,6 +103,7 @@ const PostDetail = ({ post, comments = mockComments }: PostDetailProps) => {
               fill
               className="object-cover"
               priority
+              unoptimized
             />
             {post.is_nft && (
               <div className="absolute top-4 right-4">
@@ -96,7 +120,7 @@ const PostDetail = ({ post, comments = mockComments }: PostDetailProps) => {
       {/* Creator Info */}
       <Card className="mb-4">
         <div className="flex items-center justify-between">
-          <Link href={`/profile/${post.user_id}`} className="flex items-center gap-3">
+          <Link href={`/user/${post.user?.username || post.user_id}`} className="flex items-center gap-3">
             <Avatar src={post.user?.avatar_url} alt={post.user?.username || 'User'} size="lg" />
             <div>
               <p className="font-semibold text-dark dark:text-white hover:underline">
@@ -143,34 +167,24 @@ const PostDetail = ({ post, comments = mockComments }: PostDetailProps) => {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-between pt-4">
+        <div className="flex items-center gap-2 pt-4">
           <button
             onClick={handleLike}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-xl transition-colors',
+              'flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-colors font-medium',
               isLiked ? 'text-red-500 bg-red-50 dark:bg-red-900/30' : 'text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30'
             )}
           >
             <Heart size={20} fill={isLiked ? 'currentColor' : 'none'} />
-            <span className="font-medium">Like</span>
-          </button>
-
-          <button className="flex items-center gap-2 px-4 py-2 rounded-xl text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors">
-            <MessageCircle size={20} />
-            <span className="font-medium">Comment</span>
-          </button>
-
-          <button className="flex items-center gap-2 px-4 py-2 rounded-xl text-gray-500 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors">
-            <Repeat2 size={20} />
-            <span className="font-medium">Repost</span>
+            <span>Like</span>
           </button>
 
           <button
             onClick={copyToClipboard}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors font-medium"
           >
             {copied ? <Check size={20} /> : <Share size={20} />}
-            <span className="font-medium">{copied ? 'Copied!' : 'Share'}</span>
+            <span>{copied ? 'Copied!' : 'Share'}</span>
           </button>
         </div>
       </Card>

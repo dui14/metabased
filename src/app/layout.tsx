@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { DynamicProvider } from '@/providers';
+import { DynamicProvider, ChatProvider } from '@/providers';
 import { ProgressBar } from '@/components/common';
 
 export const metadata: Metadata = {
@@ -25,7 +25,11 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased">
         <ProgressBar />
-        <DynamicProvider>{children}</DynamicProvider>
+        <DynamicProvider>
+          <ChatProvider>
+            {children}
+          </ChatProvider>
+        </DynamicProvider>
       </body>
     </html>
   );

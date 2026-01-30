@@ -7,7 +7,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useRef, useEffect } from 'react';
 import type { Post } from '@/types';
-import { useAuth } from '@/providers';
+import { useAuth, useTheme } from '@/providers';
 
 interface PostCardProps {
   post: Post;
@@ -21,6 +21,7 @@ interface PostCardProps {
 
 const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDelete }: PostCardProps) => {
   const { user } = useAuth();
+  const { t } = useTheme();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
   const [showMenu, setShowMenu] = useState(false);
@@ -28,7 +29,24 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
   
   const isOwner = user?.id === post.user_id;
 
-  // Close menu when clicking outside
+  useEffect(() => {
+    const checkLikeStatus = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const response = await fetch(`/api/likes?user_id=${user.id}&post_id=${post.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsLiked(data.isLiked);
+        }
+      } catch (error) {
+        console.error('Error checking like status:', error);
+      }
+    };
+
+    checkLikeStatus();
+  }, [user?.id, post.id]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -40,16 +58,70 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleLike = () => {
-    setIsLiked(!isLiked);
-    setLikesCount(isLiked ? likesCount - 1 : likesCount + 1);
+  const handleLike = async () => {
+    if (!user?.id) {
+      alert('Please login first');
+      return;
+    }
+
+    const newIsLiked = !isLiked;
+    const newLikesCount = newIsLiked ? likesCount + 1 : likesCount - 1;
+    
+    setIsLiked(newIsLiked);
+    setLikesCount(newLikesCount);
+
+    try {
+      const response = await fetch('/api/likes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          post_id: post.id,
+          action: newIsLiked ? 'like' : 'unlike',
+        }),
+      });
+
+      if (!response.ok) {
+        setIsLiked(!newIsLiked);
+        setLikesCount(likesCount);
+        console.error('Failed to like/unlike post');
+      }
+    } catch (error) {
+      setIsLiked(!newIsLiked);
+      setLikesCount(likesCount);
+      console.error('Error liking/unliking post:', error);
+    }
+    
     onLike?.();
   };
 
   const handleCopyUrl = async () => {
     const url = `${window.location.origin}/post/${post.id}`;
-    await navigator.clipboard.writeText(url);
-    alert('URL copied to clipboard!');
+    
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+        alert(t('urlCopied') || 'URL copied to clipboard!');
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          alert(t('urlCopied') || 'URL copied to clipboard!');
+        } catch (err) {
+          console.error('Fallback: Could not copy text', err);
+          alert(t('errorOccurred') || 'Failed to copy URL');
+        }
+        document.body.removeChild(textArea);
+      }
+    } catch (error) {
+      console.error('Error copying URL:', error);
+      alert(t('errorOccurred') || 'Failed to copy URL');
+    }
     setShowMenu(false);
   };
 
@@ -76,15 +148,25 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     if (!confirm('Are you sure you want to delete this post?')) return;
     
     try {
+      const token = localStorage.getItem('dynamic_authentication_token');
+      
       const response = await fetch(`/api/posts/${post.id}`, {
         method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
       });
 
       if (response.ok) {
+        alert('Post deleted successfully!');
         onDelete?.(post.id);
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Failed to delete post. Please try again.');
       }
     } catch (error) {
       console.error('Error deleting post:', error);
+      alert('An error occurred while deleting the post.');
     }
     setShowMenu(false);
   };
@@ -93,7 +175,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     <Card className="animate-fadeIn" hover>
       {/* Header */}
       <div className="flex items-start justify-between mb-3 gap-2">
-        <Link href={`/profile/${post.user_id}`} className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+        <Link href={`/user/${post.user?.username || post.user_id}`} className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
           <Avatar src={post.user?.avatar_url} alt={post.user?.username || 'User'} size="md" className="flex-shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-dark dark:text-white hover:underline truncate text-sm sm:text-base">
@@ -163,6 +245,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               alt={post.caption || 'Post image'}
               fill
               className="object-cover hover:scale-105 transition-transform duration-300"
+              unoptimized
             />
             {post.is_nft && (
               <div className="absolute top-3 right-3">

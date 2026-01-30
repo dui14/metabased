@@ -37,16 +37,18 @@ export interface JWTPayload {
  */
 export async function verifyDynamicJWT(token: string): Promise<JWTPayload | null> {
   try {
+    console.log('Verifying JWT token, length:', token?.length);
     const jwks = getJWKS();
     
     const { payload } = await jwtVerify(token, jwks, {
-      // Có thể thêm các options verify ở đây
-      // issuer: 'https://app.dynamic.xyz',
+      issuer: `https://app.dynamic.xyz/api/v0/environments/${process.env.NEXT_PUBLIC_DYNAMIC_ENV_ID}`,
+      audience: process.env.NEXT_PUBLIC_DYNAMIC_ENV_ID,
     });
     
+    console.log('JWT verified successfully');
     return payload as unknown as JWTPayload;
   } catch (error) {
-    console.error('JWT verification failed:', error);
+    console.log('JWT verification failed:', error instanceof Error ? error.message : error);
     return null;
   }
 }

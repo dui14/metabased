@@ -16,7 +16,7 @@ type TabType = 'posts' | 'nfts';
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { t } = useTheme();
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [posts, setPosts] = useState<Post[]>([]);
@@ -33,8 +33,10 @@ export default function ProfilePage() {
           const data = await response.json();
           setPosts(data.posts || []);
         }
+        
+        await refreshUser();
       } catch (error) {
-        console.error('Error fetching user posts:', error);
+        console.log('Error fetching user posts:', error);
       } finally {
         setIsLoading(false);
       }
@@ -55,6 +57,35 @@ export default function ProfilePage() {
     router.push('/settings');
   };
 
+  const handleShareProfile = async () => {
+    const profileUrl = `${window.location.origin}/user/${user?.username}`;
+    
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(profileUrl);
+        alert(t('profileUrlCopied') || 'Profile URL copied!');
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = profileUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          alert(t('profileUrlCopied') || 'Profile URL copied!');
+        } catch (err) {
+          console.error('Fallback: Could not copy text', err);
+          alert(t('errorOccurred') || 'Failed to copy URL');
+        }
+        document.body.removeChild(textArea);
+      }
+    } catch (error) {
+      console.error('Error copying profile URL:', error);
+      alert(t('errorOccurred') || 'Failed to copy URL');
+    }
+  };
+
   return (
     <MainLayout>
       <div className="max-w-2xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
@@ -70,7 +101,7 @@ export default function ProfilePage() {
               <div className="absolute -bottom-1 -right-1 w-4 h-4 sm:w-6 sm:h-6 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full" />
             </div>
             <div className="flex gap-2 pb-2">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleShareProfile}>
                 <Share size={14} className="sm:w-4 sm:h-4" />
               </Button>
               <Button variant="outline" size="sm" onClick={handleSettingsClick}>

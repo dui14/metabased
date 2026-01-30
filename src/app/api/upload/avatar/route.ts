@@ -31,17 +31,16 @@ export async function POST(request: NextRequest) {
     const timestamp = Date.now();
     const filename = `${userId}_${timestamp}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'posts');
+    const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'avatars');
     
-    console.log('Upload directory (cwd):', process.cwd());
-    console.log('Upload directory (full path):', uploadsDir);
+    console.log('Avatar upload directory:', uploadsDir);
     
     await mkdir(uploadsDir, { recursive: true });
     
     const filepath = path.join(uploadsDir, filename);
     await writeFile(filepath, buffer);
     
-    const url = `/uploads/posts/${filename}`;
+    const url = `/uploads/avatars/${filename}`;
 
     return NextResponse.json({ 
       url,
@@ -51,9 +50,9 @@ export async function POST(request: NextRequest) {
     }, { status: 200 });
 
   } catch (error) {
-    console.error('Upload error:', error);
+    console.error('Avatar upload error:', error);
     return NextResponse.json(
-      { error: 'Failed to upload file' },
+      { error: 'Failed to upload avatar' },
       { status: 500 }
     );
   }

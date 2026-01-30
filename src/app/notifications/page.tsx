@@ -127,7 +127,7 @@ export default function NotificationsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-dark">
                       <Link
-                        href={`/profile/${notification.user.username}`}
+                        href={`/user/${notification.user.username}`}
                         className="font-semibold hover:underline"
                       >
                         {notification.user.display_name}

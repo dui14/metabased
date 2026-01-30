@@ -98,15 +98,6 @@ Truy cập: http://localhost:3000
 
 ## Hướng dẫn phát triển
 
-### Quy trình làm việc
-
-1. Tạo branch mới từ `main`
-2. Phát triển tính năng
-3. Test cẩn thận
-4. Tạo Pull Request
-5. Review code
-6. Merge vào `main`
-
 ### Coding standards
 
 - Sử dụng TypeScript cho type safety
@@ -210,7 +201,6 @@ MIT License
 ## Contact
 
 - GitHub Issues cho bug reports
-- Email: support@metabased.com
 
 ## Acknowledgments
 

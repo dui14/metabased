@@ -30,6 +30,8 @@ export const translations = {
     following: 'Following',
     followers: 'Followers',
     unfollow: 'Unfollow',
+    unfollowUser: 'Unfollow User',
+    unfollowConfirm: 'Are you sure you want to unfollow this user?',
     message: 'Message',
     posts: 'Posts',
     nfts: 'NFTs',
@@ -85,6 +87,8 @@ export const translations = {
     errorOccurred: 'An error occurred',
     postNotFound: 'Post not found or has been deleted',
     userNotFound: 'User not found',
+    urlCopied: 'URL copied to clipboard!',
+    profileUrlCopied: 'Profile URL copied!',
     
     // Navigation
     home: 'Home',
@@ -92,6 +96,15 @@ export const translations = {
     create: 'Create',
     notifications: 'Notifications',
     messages: 'Messages',
+    
+    // Search & Discover
+    search: 'Search',
+    findUsers: 'Find users...',
+    enterSearchQuery: 'Enter a search query to find users',
+    noUsersFound: 'No users found',
+    noUsersYet: 'No users yet',
+    trendingTags: 'Trending Tags',
+    suggestedForYou: 'Suggested for You',
   },
   vi: {
     // Common
@@ -120,6 +133,8 @@ export const translations = {
     following: 'Đang theo dõi',
     followers: 'Người theo dõi',
     unfollow: 'Bỏ theo dõi',
+    unfollowUser: 'Bỏ theo dõi người dùng',
+    unfollowConfirm: 'Bạn có chắc muốn bỏ theo dõi người dùng này?',
     message: 'Nhắn tin',
     posts: 'Bài viết',
     nfts: 'NFT',
@@ -175,6 +190,8 @@ export const translations = {
     errorOccurred: 'Có lỗi xảy ra',
     postNotFound: 'Bài viết không tồn tại hoặc đã bị xóa',
     userNotFound: 'Không tìm thấy người dùng',
+    urlCopied: 'Đã sao chép URL!',
+    profileUrlCopied: 'Đã sao chép URL trang cá nhân!',
     
     // Navigation
     home: 'Trang chủ',
@@ -182,6 +199,15 @@ export const translations = {
     create: 'Tạo mới',
     notifications: 'Thông báo',
     messages: 'Tin nhắn',
+    
+    // Search & Discover
+    search: 'Tìm kiếm',
+    findUsers: 'Tìm người dùng...',
+    enterSearchQuery: 'Nhập từ khóa để tìm kiếm người dùng',
+    noUsersFound: 'Không tìm thấy người dùng',
+    noUsersYet: 'Chưa có người dùng',
+    trendingTags: 'Hashtag thịnh hành',
+    suggestedForYou: 'Đề xuất cho bạn',
   },
 };
 

@@ -71,3 +71,5 @@ temp/
 test.txt
 fix.txt
 .github/
+src/public/uploads/avatars/*
+src/public/uploads/posts/*

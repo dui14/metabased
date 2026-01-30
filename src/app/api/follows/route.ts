@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
+import { isUsingLocalDb } from '@/lib/db';
 
-// Force dynamic rendering
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-// POST /api/follows - Follow/Unfollow user
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -23,6 +22,38 @@ export async function POST(request: NextRequest) {
         { error: 'Cannot follow yourself' },
         { status: 400 }
       );
+    }
+
+    const useLocalDb = isUsingLocalDb();
+    
+    if (useLocalDb) {
+      const { query } = await import('@/lib/db');
+      
+      if (action === 'unfollow') {
+        await query(
+          'DELETE FROM follows WHERE follower_id = $1 AND following_id = $2',
+          [follower_id, following_id]
+        );
+        return NextResponse.json({ success: true, action: 'unfollowed' });
+      } else {
+        const existingFollow = await query(
+          'SELECT id FROM follows WHERE follower_id = $1 AND following_id = $2',
+          [follower_id, following_id]
+        );
+        
+        if (existingFollow.rows.length > 0) {
+          return NextResponse.json(
+            { error: 'Already following this user' },
+            { status: 409 }
+          );
+        }
+        
+        await query(
+          'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)',
+          [follower_id, following_id]
+        );
+        return NextResponse.json({ success: true, action: 'followed' });
+      }
     }
 
     const supabase = createServerSupabaseClient();
@@ -106,6 +137,19 @@ export async function GET(request: NextRequest) {
         { error: 'Follower ID and Following ID are required' },
         { status: 400 }
       );
+    }
+
+    const useLocalDb = isUsingLocalDb();
+    
+    if (useLocalDb) {
+      const { query } = await import('@/lib/db');
+      
+      const result = await query(
+        'SELECT id FROM follows WHERE follower_id = $1 AND following_id = $2',
+        [follower_id, following_id]
+      );
+      
+      return NextResponse.json({ isFollowing: result.rows.length > 0 });
     }
 
     const supabase = createServerSupabaseClient();

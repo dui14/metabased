@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { PostDetail } from '@/components/post';
 import { Card } from '@/components/common';
@@ -11,22 +11,50 @@ import type { Post } from '@/types';
 
 export default function PostDetailPage({ params }: { params: { postId: string } }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useTheme();
   const [post, setPost] = useState<Post | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchPost = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch(`/api/posts/${params.postId}`);
+        setError(null);
+        
+        const noCache = searchParams.get('noCache') === 'true';
+        const url = `/api/posts/${params.postId}${noCache ? '?noCache=true' : ''}`;
+        
+        const response = await fetch(url, {
+          cache: noCache ? 'no-store' : 'default',
+          headers: noCache ? {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          } : {}
+        });
+        
+        if (!response.ok) {
+          if (response.status === 404) {
+            setError('Post not found');
+          } else {
+            setError('Failed to load post');
+          }
+          console.error('Failed to fetch post:', response.status, response.statusText);
+          return;
+        }
+        
         const data = await response.json();
         
         if (data.post) {
           setPost(data.post);
+        } else {
+          setError('Post data not available');
+          console.error('Post data not found in response:', data);
         }
       } catch (error) {
         console.error('Error fetching post:', error);
+        setError('An error occurred while loading the post');
       } finally {
         setIsLoading(false);
       }
@@ -35,7 +63,7 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
     if (params.postId) {
       fetchPost();
     }
-  }, [params.postId]);
+  }, [params.postId, searchParams]);
 
   if (isLoading) {
     return (
@@ -47,7 +75,7 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
     );
   }
 
-  if (!post) {
+  if (error || !post) {
     return (
       <MainLayout>
         <div className="py-6 px-4">
@@ -59,12 +87,26 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
             <span className="text-sm font-medium">{t('back')}</span>
           </button>
           <Card className="text-center py-12">
-            <p className="text-gray-500">{t('postNotFound')}</p>
+            <p className="text-gray-500">{error || 'Post not found'}</p>
+            <button
+              onClick={() => router.push('/home')}
+              className="mt-4 text-primary-500 hover:text-primary-600 font-medium"
+            >
+              Back to Home
+            </button>
           </Card>
         </div>
       </MainLayout>
     );
   }
+
+  const handlePostUpdate = (updatedPost: Post) => {
+    setPost(updatedPost);
+  };
+
+  const handlePostDelete = () => {
+    router.push('/home');
+  };
 
   return (
     <MainLayout>
@@ -76,7 +118,11 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
           <ArrowLeft size={18} />
           <span className="text-sm font-medium">{t('back')}</span>
         </button>
-        <PostDetail post={post} />
+        <PostDetail 
+          post={post} 
+          onUpdate={handlePostUpdate}
+          onDelete={handlePostDelete}
+        />
       </div>
     </MainLayout>
   );
