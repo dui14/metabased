@@ -118,10 +118,12 @@ export async function closePool(): Promise<void> {
 // Export pool để sử dụng cho các trường hợp đặc biệt
 export { pool };
 
-export default {
+const dbUtils = {
   query,
   getClient,
   isUsingLocalDb,
   closePool,
   pool,
 };
+
+export default dbUtils;

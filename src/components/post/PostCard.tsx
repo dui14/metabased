@@ -6,6 +6,7 @@ import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, Eye, Ey
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Post } from '@/types';
 import { useAuth, useTheme } from '@/providers';
 
@@ -22,6 +23,7 @@ interface PostCardProps {
 const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDelete }: PostCardProps) => {
   const { user } = useAuth();
   const { t } = useTheme();
+  const router = useRouter();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
   const [showMenu, setShowMenu] = useState(false);
@@ -313,7 +315,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
         </button>
 
         <button
-          onClick={onComment}
+          onClick={() => { onComment?.(); router.push(`/post/${post.id}`); }}
           className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
         >
           <MessageCircle size={16} className="sm:w-[18px] sm:h-[18px]" />

@@ -1,30 +1,54 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MainLayout } from '@/components/layout';
-import { Card, Avatar, Button, Badge } from '@/components/common';
-import { Heart, MessageCircle, UserPlus, Sparkles, ShoppingCart, Check, Settings, Bell } from 'lucide-react';
+import { Card, Avatar, Button } from '@/components/common';
+import {
+  Heart,
+  MessageCircle,
+  UserPlus,
+  Sparkles,
+  ShoppingCart,
+  Check,
+  Bell,
+  Loader2,
+  Info,
+} from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 
-export interface Notification {
+type NotificationType =
+  | 'like'
+  | 'comment'
+  | 'follow'
+  | 'nft_sold'
+  | 'nft_offer'
+  | 'system';
+
+interface Notification {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'nft_sold' | 'nft_minted' | 'mention';
-  user: {
-    username: string;
-    display_name: string;
-  };
-  content?: string;
-  post_id?: string;
-  nft_id?: string;
+  type: NotificationType;
+  title: string | null;
+  message: string | null;
+  reference_id: string | null;
+  reference_type: string | null;
+  actor_id: string | null;
+  is_read: boolean;
   created_at: string;
-  read: boolean;
+  actor?: {
+    id: string;
+    username: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+  } | null;
 }
 
-// TODO: Replace with real data from API
-const notifications: Notification[] = [];
+interface NotificationsResponse {
+  notifications: Notification[];
+  unread_count: number;
+}
 
-const getNotificationIcon = (type: Notification['type']) => {
+const getNotificationIcon = (type: NotificationType) => {
   switch (type) {
     case 'like':
       return <Heart size={18} className="text-red-500" fill="currentColor" />;
@@ -34,37 +58,144 @@ const getNotificationIcon = (type: Notification['type']) => {
       return <UserPlus size={18} className="text-green-500" />;
     case 'nft_sold':
       return <ShoppingCart size={18} className="text-purple-500" />;
-    case 'nft_minted':
+    case 'nft_offer':
       return <Sparkles size={18} className="text-primary-500" />;
+    case 'system':
+      return <Info size={18} className="text-blue-500" />;
     default:
       return <MessageCircle size={18} className="text-gray-500" />;
   }
 };
 
 const getNotificationText = (notification: Notification): string => {
+  if (notification.message) {
+    return notification.message;
+  }
+
   switch (notification.type) {
     case 'like':
       return 'liked your post';
     case 'comment':
-      return `commented: "${notification.content}"`;
+      return 'commented on your post';
     case 'follow':
       return 'started following you';
     case 'nft_sold':
       return 'bought your NFT';
-    case 'nft_minted':
-      return 'Your NFT was minted successfully';
+    case 'nft_offer':
+      return 'made an offer on your NFT';
+    case 'system':
+      return notification.title || 'sent you an update';
     default:
       return 'interacted with your content';
   }
 };
 
-export default function NotificationsPage() {
-  const [filter, setFilter] = useState<'all' | 'unread'>('all');
-  const unreadCount = notifications.filter((n) => !n.read).length;
+const getNotificationHref = (notification: Notification): string => {
+  if (notification.reference_type === 'post' && notification.reference_id) {
+    return `/post/${notification.reference_id}`;
+  }
 
-  const filteredNotifications = notifications.filter((n) =>
-    filter === 'all' ? true : !n.read
-  );
+  if (notification.reference_type === 'user' && notification.actor?.username) {
+    return `/user/${notification.actor.username}`;
+  }
+
+  if (notification.reference_type === 'conversation') {
+    return '/messages';
+  }
+
+  if (notification.actor?.username) {
+    return `/user/${notification.actor.username}`;
+  }
+
+  return '/notifications';
+};
+
+export default function NotificationsPage() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
+
+  const fetchNotifications = async (activeFilter: 'all' | 'unread') => {
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/notifications?filter=${activeFilter}&limit=50`, {
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load notifications');
+      }
+
+      const data: NotificationsResponse = await response.json();
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unread_count || 0);
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+      setNotifications([]);
+      setUnreadCount(0);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications(filter);
+  }, [filter]);
+
+  const handleMarkOneRead = async (notificationId: string) => {
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ notification_id: notificationId }),
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      setNotifications((prev) =>
+        prev.map((item) =>
+          item.id === notificationId ? { ...item, is_read: true } : item
+        )
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+
+      if (filter === 'unread') {
+        setNotifications((prev) => prev.filter((item) => item.id !== notificationId));
+      }
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      setIsMarkingAll(true);
+      const response = await fetch('/api/notifications/read-all', {
+        method: 'PATCH',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to mark all notifications as read');
+      }
+
+      if (filter === 'unread') {
+        setNotifications([]);
+      } else {
+        setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+      }
+      setUnreadCount(0);
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    } finally {
+      setIsMarkingAll(false);
+    }
+  };
 
   return (
     <MainLayout>
@@ -78,12 +209,14 @@ export default function NotificationsPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleMarkAllRead}
+              disabled={unreadCount === 0 || isMarkingAll}
+            >
               <Check size={16} className="mr-1" />
-              Mark all read
-            </Button>
-            <Button variant="ghost" size="sm">
-              <Settings size={16} />
+              {isMarkingAll ? 'Marking...' : 'Mark all read'}
             </Button>
           </div>
         </div>
@@ -110,16 +243,24 @@ export default function NotificationsPage() {
 
         {/* Notifications List */}
         <div className="space-y-2">
-          {filteredNotifications.length > 0 ? (
-            filteredNotifications.map((notification) => (
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
+            </div>
+          ) : notifications.length > 0 ? (
+            notifications.map((notification) => (
               <Card
                 key={notification.id}
-                className={`${!notification.read ? 'bg-primary-50/50 border-primary-100' : ''}`}
+                className={`${!notification.is_read ? 'bg-primary-50/50 border-primary-100' : ''}`}
                 hover
               >
                 <div className="flex items-start gap-3">
                   <div className="relative">
-                    <Avatar alt={notification.user.display_name} size="md" />
+                    <Avatar
+                      src={notification.actor?.avatar_url || undefined}
+                      alt={notification.actor?.display_name || notification.actor?.username || 'User'}
+                      size="md"
+                    />
                     <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-soft">
                       {getNotificationIcon(notification.type)}
                     </div>
@@ -127,10 +268,10 @@ export default function NotificationsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-dark">
                       <Link
-                        href={`/user/${notification.user.username}`}
+                        href={getNotificationHref(notification)}
                         className="font-semibold hover:underline"
                       >
-                        {notification.user.display_name}
+                        {notification.actor?.display_name || notification.actor?.username || 'Someone'}
                       </Link>{' '}
                       {getNotificationText(notification)}
                     </p>
@@ -138,8 +279,13 @@ export default function NotificationsPage() {
                       {formatDate(notification.created_at)}
                     </p>
                   </div>
-                  {!notification.read && (
-                    <div className="w-2 h-2 bg-primary-400 rounded-full" />
+                  {!notification.is_read && (
+                    <button
+                      type="button"
+                      onClick={() => handleMarkOneRead(notification.id)}
+                      className="w-2 h-2 bg-primary-400 rounded-full mt-2"
+                      title="Mark as read"
+                    />
                   )}
                 </div>
               </Card>

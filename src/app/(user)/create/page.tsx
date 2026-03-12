@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Card, Button, Avatar, Badge } from '@/components/common';
@@ -188,11 +189,13 @@ export default function CreatePostPage() {
           />
           
           {selectedImage ? (
-            <div className="relative">
-              <img
+            <div className="relative w-full aspect-square">
+              <Image
                 src={selectedImage}
                 alt="Selected"
-                className="w-full aspect-square object-cover rounded-xl"
+                fill
+                unoptimized
+                className="object-cover rounded-xl"
               />
               <button
                 onClick={() => {

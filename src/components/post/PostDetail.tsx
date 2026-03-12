@@ -2,10 +2,10 @@
 
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import { Avatar, Badge, Button, Card, Input } from '@/components/common';
-import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, ExternalLink, Copy, Check } from 'lucide-react';
+import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, ExternalLink, Copy, Check, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers';
 import type { Post, Comment } from '@/types';
@@ -22,8 +22,16 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
   const { user } = useAuth();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
+  const [commentsCount, setCommentsCount] = useState(post.comments_count);
+  const [commentsList, setCommentsList] = useState<Comment[]>(comments);
+  const [commentLikes, setCommentLikes] = useState<{ [key: string]: { count: number; isLiked: boolean } }>({});
   const [newComment, setNewComment] = useState('');
+  const [isPostingComment, setIsPostingComment] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
+
+  const isOwner = user?.id === post.user_id;
 
   useEffect(() => {
     const checkLikeStatus = async () => {
@@ -42,6 +50,65 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
 
     checkLikeStatus();
   }, [user?.id, post.id]);
+
+  useEffect(() => {
+    if (!user?.id || isOwner) return;
+    const checkFollowStatus = async () => {
+      try {
+        const res = await fetch(`/api/follows?follower_id=${user.id}&following_id=${post.user_id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setIsFollowing(data.isFollowing);
+        }
+      } catch {
+        // silent
+      }
+    };
+    checkFollowStatus();
+  }, [user?.id, post.user_id, isOwner]);
+
+  const handleFollow = async () => {
+    if (!user?.id || isFollowLoading) return;
+    setIsFollowLoading(true);
+    const newFollowing = !isFollowing;
+    setIsFollowing(newFollowing);
+    try {
+      await fetch('/api/follows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          follower_id: user.id,
+          following_id: post.user_id,
+          action: newFollowing ? 'follow' : 'unfollow',
+        }),
+      });
+    } catch {
+      setIsFollowing(!newFollowing);
+    } finally {
+      setIsFollowLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const fetchComments = async () => {
+      try {
+        const response = await fetch(`/api/comments?post_id=${post.id}`, {
+          cache: 'no-store',
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        setCommentsList(data.comments || []);
+      } catch (error) {
+        console.log('Error fetching comments:', error);
+      }
+    };
+
+    fetchComments();
+  }, [post.id]);
 
   const handleLike = async () => {
     if (!user?.id) {
@@ -91,6 +158,137 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
     }
   };
 
+  const handleCreateComment = async () => {
+    if (!user?.id || !newComment.trim() || isPostingComment) return;
+
+    setIsPostingComment(true);
+    try {
+      const response = await fetch('/api/comments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          post_id: post.id,
+          user_id: user.id,
+          content: newComment.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      if (data.comment) {
+        setCommentsList((prev) => [data.comment, ...prev]);
+        setCommentsCount((prev) => prev + 1);
+        setNewComment('');
+      }
+    } catch (error) {
+      console.log('Error creating comment:', error);
+    } finally {
+      setIsPostingComment(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!user?.id) return;
+
+    try {
+      const response = await fetch(`/api/comments?comment_id=${commentId}&user_id=${user.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        console.log('Failed to delete comment');
+        return;
+      }
+
+      setCommentsList((prev) => prev.filter((c) => c.id !== commentId));
+      setCommentsCount((prev) => Math.max(0, prev - 1));
+    } catch (error) {
+      console.log('Error deleting comment:', error);
+    }
+  };
+
+  const loadCommentLikes = useCallback(async (commentId: string) => {
+    if (!user?.id) return;
+    try {
+      const response = await fetch(`/api/comments/likes?comment_id=${commentId}&user_id=${user.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setCommentLikes((prev) => ({
+          ...prev,
+          [commentId]: { count: data.likes_count, isLiked: data.isLiked },
+        }));
+      }
+    } catch (error) {
+      console.log('Error loading comment likes:', error);
+    }
+  }, [user?.id]);
+
+  const handleLikeComment = async (commentId: string) => {
+    if (!user?.id) {
+      alert('Please login first');
+      return;
+    }
+
+    const currentLike = commentLikes[commentId] || { count: 0, isLiked: false };
+    const newIsLiked = !currentLike.isLiked;
+    const newCount = newIsLiked ? currentLike.count + 1 : Math.max(0, currentLike.count - 1);
+
+    // Optimistic update
+    setCommentLikes((prev) => ({
+      ...prev,
+      [commentId]: { count: newCount, isLiked: newIsLiked },
+    }));
+
+    try {
+      const response = await fetch('/api/comments/likes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comment_id: commentId,
+          user_id: user.id,
+          action: newIsLiked ? 'like' : 'unlike',
+        }),
+      });
+
+      if (!response.ok) {
+        // Revert optimistic update
+        setCommentLikes((prev) => ({
+          ...prev,
+          [commentId]: currentLike,
+        }));
+        console.log('Failed to like/unlike comment');
+      } else {
+        const data = await response.json();
+        setCommentLikes((prev) => ({
+          ...prev,
+          [commentId]: { count: data.likes_count, isLiked: newIsLiked },
+        }));
+      }
+    } catch (error) {
+      // Revert optimistic update
+      setCommentLikes((prev) => ({
+        ...prev,
+        [commentId]: currentLike,
+      }));
+      console.log('Error liking/unliking comment:', error);
+    }
+  };
+
+  // Load comment likes when comments change
+  useEffect(() => {
+    if (!user?.id) return;
+    commentsList.forEach((comment) => {
+      if (!commentLikes[comment.id]) {
+        loadCommentLikes(comment.id);
+      }
+    });
+  }, [commentsList, user?.id, commentLikes, loadCommentLikes]);
+
   return (
     <div className="max-w-2xl mx-auto">
       {/* Main Content */}
@@ -129,9 +327,16 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
               <p className="text-sm text-gray-400">@{post.user?.username}</p>
             </div>
           </Link>
-          <Button variant="primary" size="sm">
-            Follow
-          </Button>
+          {!isOwner && (
+            <Button
+              variant={isFollowing ? 'outline' : 'primary'}
+              size="sm"
+              onClick={handleFollow}
+              disabled={isFollowLoading}
+            >
+              {isFollowing ? 'Following' : 'Follow'}
+            </Button>
+          )}
         </div>
 
         {/* Caption */}
@@ -157,7 +362,7 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
             <span className="text-gray-500 ml-1">Likes</span>
           </div>
           <div>
-            <span className="font-semibold text-dark dark:text-white">{formatNumber(post.comments_count)}</span>
+            <span className="font-semibold text-dark dark:text-white">{formatNumber(commentsCount)}</span>
             <span className="text-gray-500 ml-1">Comments</span>
           </div>
           <div>
@@ -247,7 +452,7 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
 
       {/* Comments Section */}
       <Card>
-        <h3 className="font-semibold text-dark dark:text-white mb-4">Comments ({comments.length})</h3>
+        <h3 className="font-semibold text-dark dark:text-white mb-4">Comments ({commentsCount})</h3>
 
         {/* Comment Input */}
         <div className="flex items-start gap-3 mb-6">
@@ -260,7 +465,12 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
               placeholder="Add a comment..."
               className="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm text-dark dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
             />
-            <Button variant="primary" size="md" disabled={!newComment.trim()}>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleCreateComment}
+              disabled={!newComment.trim() || isPostingComment}
+            >
               Post
             </Button>
           </div>
@@ -268,26 +478,45 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
 
         {/* Comments List */}
         <div className="space-y-4">
-          {comments.map((comment) => (
-            <div key={comment.id} className="flex items-start gap-3">
+          {commentsList.map((comment) => (
+            <div key={comment.id} className="flex items-start gap-3 group/comment">
               <Avatar src={comment.user?.avatar_url} alt={comment.user?.username || 'User'} size="sm" />
               <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-dark dark:text-white text-sm">
-                    {comment.user?.display_name || comment.user?.username}
-                  </span>
-                  <span className="text-xs text-gray-400">
-                    @{comment.user?.username}
-                  </span>
-                  <span className="text-xs text-gray-400">·</span>
-                  <span className="text-xs text-gray-400">
-                    {formatDate(comment.created_at)}
-                  </span>
+                <div className="flex items-center gap-2 justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-dark dark:text-white text-sm">
+                      {comment.user?.display_name || comment.user?.username}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      @{comment.user?.username}
+                    </span>
+                    <span className="text-xs text-gray-400">·</span>
+                    <span className="text-xs text-gray-400">
+                      {formatDate(comment.created_at)}
+                    </span>
+                  </div>
+                  {user?.id === comment.user_id && (
+                    <button
+                      onClick={() => handleDeleteComment(comment.id)}
+                      className="opacity-0 group-hover/comment:opacity-100 transition-opacity text-xs text-gray-400 hover:text-red-500 ml-2"
+                      title="Delete comment"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
                 <p className="text-dark dark:text-white text-sm mt-1">{comment.content}</p>
                 <div className="flex items-center gap-4 mt-2">
-                  <button className="text-xs text-gray-400 hover:text-red-500 transition-colors">
-                    Like
+                  <button
+                    onClick={() => handleLikeComment(comment.id)}
+                    className={`text-xs transition-colors flex items-center gap-1 ${
+                      commentLikes[comment.id]?.isLiked
+                        ? 'text-red-500 hover:text-red-600'
+                        : 'text-gray-400 hover:text-red-500'
+                    }`}
+                  >
+                    <Heart size={14} fill={commentLikes[comment.id]?.isLiked ? 'currentColor' : 'none'} />
+                    {commentLikes[comment.id]?.count || 0}
                   </button>
                   <button className="text-xs text-gray-400 hover:text-primary-500 transition-colors">
                     Reply
@@ -296,6 +525,10 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
               </div>
             </div>
           ))}
+
+          {commentsList.length === 0 && (
+            <p className="text-sm text-gray-500 text-center py-4">No comments yet</p>
+          )}
         </div>
       </Card>
     </div>

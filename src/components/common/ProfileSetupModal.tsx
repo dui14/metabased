@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Modal, Input, Button } from '@/components/common';
 import { User, AtSign, Mail, Wallet, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
@@ -13,6 +13,10 @@ interface ProfileSetupModalProps {
   onComplete: (username: string, displayName: string) => void;
   walletAddress: string;
 }
+
+const USERNAME_REGEX = /^[a-z0-9_]{3,30}$/;
+
+const validateUsername = (value: string): boolean => USERNAME_REGEX.test(value);
 
 const ProfileSetupModal = ({ isOpen, onComplete, walletAddress }: ProfileSetupModalProps) => {
   const { user } = useAuth();
@@ -32,22 +36,15 @@ const ProfileSetupModal = ({ isOpen, onComplete, walletAddress }: ProfileSetupMo
     if (!avatarUrl) {
       setAvatarUrl(getRandomAvatarUrl());
     }
-  }, []);
+  }, [avatarUrl]);
 
   // Function để random lại avatar
   const randomizeAvatar = () => {
     setAvatarUrl(getRandomAvatarUrl());
   };
 
-  // Validate username format
-  const validateUsername = (value: string): boolean => {
-    // Username chỉ chấp nhận chữ thường, số và underscore, 3-30 ký tự
-    const usernameRegex = /^[a-z0-9_]{3,30}$/;
-    return usernameRegex.test(value);
-  };
-
   // Check if username is available
-  const checkUsernameAvailable = async (value: string) => {
+  const checkUsernameAvailable = useCallback(async (value: string) => {
     if (!validateUsername(value)) {
       setUsernameError('Username phải có 3-30 ký tự, chỉ bao gồm chữ thường, số và dấu gạch dưới');
       return false;
@@ -72,7 +69,7 @@ const ProfileSetupModal = ({ isOpen, onComplete, walletAddress }: ProfileSetupMo
     } finally {
       setIsCheckingUsername(false);
     }
-  };
+  }, []);
 
   // Debounce username check
   useEffect(() => {
@@ -86,7 +83,7 @@ const ProfileSetupModal = ({ isOpen, onComplete, walletAddress }: ProfileSetupMo
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [username]);
+  }, [username, checkUsernameAvailable]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
