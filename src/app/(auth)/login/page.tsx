@@ -92,7 +92,7 @@ const LoginPage = () => {
               </div>
               <div>
                 <h3 className="font-semibold text-dark">Built on Base</h3>
-                <p className="text-sm text-gray-500">Low fees, fast transactions on Coinbase's L2</p>
+                <p className="text-sm text-gray-500">Low fees, fast transactions on Coinbase&apos;s L2</p>
               </div>
             </div>
 

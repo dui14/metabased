@@ -121,7 +121,7 @@ const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
           <div className="text-center py-8">
             <Loader2 size={48} className="mx-auto text-primary-500 animate-spin mb-4" />
             <p className="text-dark font-medium">{getStatusMessage()}</p>
-            <p className="text-sm text-gray-400 mt-2">Please don't close this window</p>
+            <p className="text-sm text-gray-400 mt-2">Please don&apos;t close this window</p>
           </div>
         )}
 

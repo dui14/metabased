@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
+import { createNotification } from '@/lib/notifications';
+import { CACHE_KEYS, deleteCache, deleteCacheByPrefix } from '@/lib/cache';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -155,6 +157,25 @@ export async function POST(request: NextRequest) {
           WHERE id = $1
         `, [sender_id]);
 
+        if (receiver_id !== sender_id) {
+          try {
+            await createNotification({
+              userId: receiver_id,
+              type: 'system',
+              actorId: sender_id,
+              referenceType: 'conversation',
+              referenceId: conversation_id,
+              title: 'New message',
+              message: 'sent you a new message',
+            });
+
+            deleteCacheByPrefix(CACHE_KEYS.USER_NOTIFICATIONS(receiver_id));
+            deleteCache(CACHE_KEYS.USER_NOTIFICATIONS_UNREAD(receiver_id));
+          } catch (notificationError) {
+            console.error('Error creating message notification (local DB):', notificationError);
+          }
+        }
+
         return NextResponse.json({
           message: {
             ...message,
@@ -238,6 +259,25 @@ export async function POST(request: NextRequest) {
         last_message_at: message.created_at,
       })
       .eq('id', conversation_id);
+
+    if (receiver_id !== sender_id) {
+      try {
+        await createNotification({
+          userId: receiver_id,
+          type: 'system',
+          actorId: sender_id,
+          referenceType: 'conversation',
+          referenceId: conversation_id,
+          title: 'New message',
+          message: 'sent you a new message',
+        });
+
+        deleteCacheByPrefix(CACHE_KEYS.USER_NOTIFICATIONS(receiver_id));
+        deleteCache(CACHE_KEYS.USER_NOTIFICATIONS_UNREAD(receiver_id));
+      } catch (notificationError) {
+        console.error('Error creating message notification (supabase):', notificationError);
+      }
+    }
 
     return NextResponse.json({ message });
   } catch (error) {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
+import { createNotification } from '@/lib/notifications';
+import { CACHE_KEYS, deleteCache, deleteCacheByPrefix } from '@/lib/cache';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -59,6 +61,8 @@ export async function POST(request: NextRequest) {
         const client = await getClient();
         try {
           await client.query('BEGIN');
+
+          let postOwnerId: string | null = null;
           
           const existingLike = await client.query(
             'SELECT id FROM likes WHERE user_id = $1 AND post_id = $2',
@@ -78,6 +82,12 @@ export async function POST(request: NextRequest) {
             'INSERT INTO likes (user_id, post_id) VALUES ($1, $2)',
             [user_id, post_id]
           );
+
+          const postOwnerResult = await client.query(
+            'SELECT user_id FROM posts WHERE id = $1 LIMIT 1',
+            [post_id]
+          );
+          postOwnerId = postOwnerResult.rows[0]?.user_id || null;
           
           const countResult = await client.query(
             'SELECT COUNT(*)::int as count FROM likes WHERE post_id = $1',
@@ -90,6 +100,26 @@ export async function POST(request: NextRequest) {
           );
           
           await client.query('COMMIT');
+
+          if (postOwnerId && postOwnerId !== user_id) {
+            try {
+              await createNotification({
+                userId: postOwnerId,
+                type: 'like',
+                actorId: user_id,
+                referenceType: 'post',
+                referenceId: post_id,
+                title: 'New like',
+                message: 'liked your post',
+              });
+
+              deleteCacheByPrefix(CACHE_KEYS.USER_NOTIFICATIONS(postOwnerId));
+              deleteCache(CACHE_KEYS.USER_NOTIFICATIONS_UNREAD(postOwnerId));
+            } catch (notificationError) {
+              console.error('Error creating like notification (local DB):', notificationError);
+            }
+          }
+
           console.log('Liked post successfully');
           return NextResponse.json({ success: true, action: 'liked' });
         } catch (error) {
@@ -156,6 +186,36 @@ export async function POST(request: NextRequest) {
           { error: 'Failed to like' },
           { status: 500 }
         );
+      }
+
+      const { data: postData, error: postError } = await supabase
+        .from('posts')
+        .select('user_id')
+        .eq('id', post_id)
+        .single();
+
+      if (postError) {
+        console.error('Error loading post owner for notification:', postError);
+      }
+
+      const postOwnerId = postData?.user_id || null;
+      if (postOwnerId && postOwnerId !== user_id) {
+        try {
+          await createNotification({
+            userId: postOwnerId,
+            type: 'like',
+            actorId: user_id,
+            referenceType: 'post',
+            referenceId: post_id,
+            title: 'New like',
+            message: 'liked your post',
+          });
+
+          deleteCacheByPrefix(CACHE_KEYS.USER_NOTIFICATIONS(postOwnerId));
+          deleteCache(CACHE_KEYS.USER_NOTIFICATIONS_UNREAD(postOwnerId));
+        } catch (notificationError) {
+          console.error('Error creating like notification (supabase):', notificationError);
+        }
       }
 
       console.log('Liked post successfully');

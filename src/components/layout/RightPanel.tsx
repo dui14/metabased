@@ -1,45 +1,135 @@
 'use client';
 
-import { cn } from '@/lib/utils';
-import { Avatar, Input } from '@/components/common';
-import { Send, Search, MoreHorizontal, Phone, Video } from 'lucide-react';
-import { useState } from 'react';
+import { cn, formatDate } from '@/lib/utils';
+import { Avatar } from '@/components/common';
+import { Send, Search, MessageSquare } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '@/providers';
+import Link from 'next/link';
 
-interface Chat {
+interface Conversation {
   id: string;
-  user: {
-    name: string;
-    avatar?: string;
-    online: boolean;
-  };
-  lastMessage: string;
-  time: string;
-  unread: number;
+  other_user_id: string;
+  other_username: string | null;
+  other_display_name: string | null;
+  other_avatar_url: string | null;
+  unread_count: number;
+  last_message_at: string | null;
 }
 
 interface Message {
   id: string;
   content: string;
-  sender: 'me' | 'other';
-  time: string;
+  sender_id: string;
+  created_at: string;
 }
 
-// TODO: Fetch real chats and messages from API
-const mockChats: Chat[] = [];
-const mockMessages: Message[] = [];
-
 const RightPanel = () => {
-  const [selectedChat, setSelectedChat] = useState<string>('1');
+  const { user } = useAuth();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [message, setMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const activeChat = mockChats.find((c) => c.id === selectedChat);
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchConversations = async () => {
+      try {
+        const res = await fetch(`/api/conversations?user_id=${user.id}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        setConversations(data.conversations || []);
+      } catch {
+        // silent
+      }
+    };
+
+    fetchConversations();
+    const timer = setInterval(fetchConversations, 15000);
+    return () => clearInterval(timer);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!selectedConvId) return;
+
+    const fetchMessages = async () => {
+      try {
+        const res = await fetch(`/api/messages?conversation_id=${selectedConvId}&limit=30`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        setMessages(data.messages || []);
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+      } catch {
+        // silent
+      }
+    };
+
+    fetchMessages();
+    const timer = setInterval(fetchMessages, 5000);
+    return () => clearInterval(timer);
+  }, [selectedConvId]);
+
+  const handleSend = async () => {
+    if (!message.trim() || !selectedConvId || !user?.id || isSending) return;
+
+    const conv = conversations.find((c) => c.id === selectedConvId);
+    if (!conv) return;
+
+    setIsSending(true);
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: selectedConvId,
+          sender_id: user.id,
+          receiver_id: conv.other_user_id,
+          content: message.trim(),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages((prev) => [...prev, data.message]);
+        setMessage('');
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        // update unread badge
+        setConversations((prev) =>
+          prev.map((c) => (c.id === selectedConvId ? { ...c, last_message_at: new Date().toISOString() } : c))
+        );
+      }
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const filteredConvs = conversations.filter((c) => {
+    const name = (c.other_display_name || c.other_username || '').toLowerCase();
+    return name.includes(searchQuery.toLowerCase());
+  });
+
+  const activeConv = conversations.find((c) => c.id === selectedConvId);
 
   return (
     <aside className="fixed right-0 top-0 h-screen w-[25%] border-l border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col transition-colors z-50 hidden lg:flex">
       {/* Header */}
       <div className="p-4 border-b border-gray-100 dark:border-gray-800">
-        <h2 className="text-lg font-semibold text-dark dark:text-white mb-3">Messages</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-dark dark:text-white">Messages</h2>
+          <Link href="/messages" className="text-xs text-primary-500 hover:underline">
+            View all
+          </Link>
+        </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
           <input
@@ -52,132 +142,130 @@ const RightPanel = () => {
         </div>
       </div>
 
-      {/* Chat List */}
+      {/* Conversation List */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        <div className="h-[40%] overflow-y-auto border-b border-gray-100 dark:border-gray-800">
-          {mockChats.length > 0 ? (
-            mockChats.map((chat) => (
+        <div className={cn('overflow-y-auto border-b border-gray-100 dark:border-gray-800', selectedConvId ? 'h-[40%]' : 'flex-1')}>
+          {filteredConvs.length > 0 ? (
+            filteredConvs.map((conv) => (
               <button
-                key={chat.id}
-                onClick={() => setSelectedChat(chat.id)}
+                key={conv.id}
+                onClick={() => setSelectedConvId(conv.id)}
                 className={cn(
                   'w-full flex items-center gap-3 p-4 transition-colors text-left',
-                  selectedChat === chat.id
+                  selectedConvId === conv.id
                     ? 'bg-primary-50 dark:bg-primary-900/30'
                     : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                 )}
               >
-                <div className="relative">
-                  <Avatar src={chat.user.avatar} alt={chat.user.name} size="md" />
-                  {chat.user.online && (
-                    <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
-                  )}
-                </div>
+                <Avatar
+                  src={conv.other_avatar_url || undefined}
+                  alt={conv.other_display_name || conv.other_username || 'User'}
+                  size="md"
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-dark dark:text-white truncate">
-                      {chat.user.name}
+                      {conv.other_display_name || conv.other_username || 'Unknown'}
                     </p>
-                    <span className="text-xs text-gray-400">{chat.time}</span>
+                    {conv.last_message_at && (
+                      <span className="text-xs text-gray-400 shrink-0 ml-1">
+                        {formatDate(conv.last_message_at)}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-500 truncate">{chat.lastMessage}</p>
+                  <p className="text-xs text-gray-400 truncate">@{conv.other_username}</p>
                 </div>
-                {chat.unread > 0 && (
-                  <span className="w-5 h-5 bg-primary-400 text-white text-xs rounded-full flex items-center justify-center">
-                    {chat.unread}
+                {conv.unread_count > 0 && (
+                  <span className="min-w-5 h-5 px-1 bg-primary-400 text-white text-xs rounded-full flex items-center justify-center shrink-0">
+                    {conv.unread_count > 99 ? '99+' : conv.unread_count}
                   </span>
                 )}
               </button>
             ))
           ) : (
             <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-              <p className="text-gray-400 text-sm">Chưa có cuộc trò chuyện</p>
+              <MessageSquare size={32} className="text-gray-200 mb-2" />
+              <p className="text-gray-400 text-sm">
+                {user ? 'Chưa có cuộc trò chuyện' : 'Đăng nhập để xem tin nhắn'}
+              </p>
             </div>
           )}
         </div>
 
         {/* Active Chat */}
-        <div className="flex-1 flex flex-col">
-          {/* Chat Header */}
-          {activeChat && (
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
-              <div className="flex items-center gap-3">
-                <Avatar alt={activeChat.user.name} size="sm" />
-                <div>
-                  <p className="text-sm font-semibold text-dark dark:text-white">{activeChat.user.name}</p>
-                  <p className="text-xs text-green-500">
-                    {activeChat.user.online ? 'Online' : 'Offline'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-                  <Phone size={18} className="text-gray-500" />
-                </button>
-                <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-                  <Video size={18} className="text-gray-500" />
-                </button>
-                <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-                  <MoreHorizontal size={18} className="text-gray-500" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {mockMessages.length > 0 ? (
-              mockMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={cn(
-                    'flex',
-                    msg.sender === 'me' ? 'justify-end' : 'justify-start'
-                  )}
-                >
-                  <div
-                    className={cn(
-                      'max-w-[80%] px-4 py-2 rounded-2xl',
-                      msg.sender === 'me'
-                        ? 'bg-primary-400 text-white rounded-br-md'
-                        : 'bg-gray-100 dark:bg-gray-800 text-dark dark:text-white rounded-bl-md'
-                    )}
-                  >
-                    <p className="text-sm">{msg.content}</p>
-                    <p
-                      className={cn(
-                        'text-[10px] mt-1',
-                        msg.sender === 'me' ? 'text-white/70' : 'text-gray-400'
-                      )}
-                    >
-                      {msg.time}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <p className="text-gray-400 text-sm">Chưa có tin nhắn</p>
-              </div>
-            )}
-          </div>
-
-          {/* Message Input */}
-          <div className="p-4 border-t border-gray-100 dark:border-gray-800">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm text-dark dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
+        {selectedConvId && activeConv && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Chat Header */}
+            <div className="flex items-center gap-3 p-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
+              <Avatar
+                src={activeConv.other_avatar_url || undefined}
+                alt={activeConv.other_display_name || activeConv.other_username || 'User'}
+                size="sm"
               />
-              <button className="p-2.5 bg-primary-400 hover:bg-primary-500 text-white rounded-xl transition-colors">
-                <Send size={18} />
-              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-dark dark:text-white truncate">
+                  {activeConv.other_display_name || activeConv.other_username}
+                </p>
+                <p className="text-xs text-gray-400 truncate">@{activeConv.other_username}</p>
+              </div>
+              <Link
+                href="/messages"
+                className="text-xs text-primary-500 hover:underline shrink-0"
+              >
+                Open
+              </Link>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {messages.length > 0 ? (
+                messages.map((msg) => {
+                  const isMe = msg.sender_id === user?.id;
+                  return (
+                    <div key={msg.id} className={cn('flex', isMe ? 'justify-end' : 'justify-start')}>
+                      <div
+                        className={cn(
+                          'max-w-[85%] px-3 py-2 rounded-2xl text-sm',
+                          isMe
+                            ? 'bg-primary-400 text-white rounded-br-md'
+                            : 'bg-gray-100 dark:bg-gray-800 text-dark dark:text-white rounded-bl-md'
+                        )}
+                      >
+                        {msg.content}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-400 text-xs">Chưa có tin nhắn</p>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Message Input */}
+            <div className="p-3 border-t border-gray-100 dark:border-gray-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Nhắn tin..."
+                  className="flex-1 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm text-dark dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!message.trim() || isSending}
+                  className="p-2 bg-primary-400 hover:bg-primary-500 disabled:opacity-50 text-white rounded-xl transition-colors"
+                >
+                  <Send size={16} />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </aside>
   );

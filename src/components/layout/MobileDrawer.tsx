@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { X, Home, Search, Bell, Plus, Settings, User } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface MobileDrawerProps {
   isOpen: boolean;
@@ -12,11 +13,41 @@ interface MobileDrawerProps {
 
 const MobileDrawer = ({ isOpen, onClose }: MobileDrawerProps) => {
   const pathname = usePathname();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let mounted = true;
+
+    const fetchUnreadCount = async () => {
+      try {
+        const response = await fetch('/api/notifications/unread-count', { cache: 'no-store' });
+        if (!response.ok) {
+          if (mounted) setUnreadCount(0);
+          return;
+        }
+
+        const data = await response.json();
+        if (mounted) {
+          setUnreadCount(data.unread_count || 0);
+        }
+      } catch (error) {
+        if (mounted) setUnreadCount(0);
+      }
+    };
+
+    fetchUnreadCount();
+
+    return () => {
+      mounted = false;
+    };
+  }, [isOpen]);
 
   const navItems = [
     { icon: Home, label: 'Home', href: '/' },
     { icon: Search, label: 'Discover', href: '/discover' },
-    { icon: Bell, label: 'Notifications', href: '/notifications' },
+    { icon: Bell, label: 'Notifications', href: '/notifications', badge: unreadCount },
     { icon: Plus, label: 'Create Post', href: '/create' },
     { icon: User, label: 'Profile', href: '/profile' },
     { icon: Settings, label: 'Settings', href: '/settings' },
@@ -61,14 +92,21 @@ const MobileDrawer = ({ isOpen, onClose }: MobileDrawerProps) => {
                     href={item.href}
                     onClick={onClose}
                     className={cn(
-                      'flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-all duration-200',
+                      'flex items-center justify-between px-4 py-3 rounded-xl text-base font-medium transition-all duration-200',
                       isActive
                         ? 'bg-primary-50 text-primary-500'
                         : 'text-gray-600 hover:bg-gray-50 hover:text-dark'
                     )}
                   >
-                    <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-                    <span>{item.label}</span>
+                    <span className="flex items-center gap-3">
+                      <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+                      <span>{item.label}</span>
+                    </span>
+                    {!!item.badge && item.badge > 0 && (
+                      <span className="min-w-5 h-5 px-1 bg-primary-500 text-white text-xs rounded-full flex items-center justify-center">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );

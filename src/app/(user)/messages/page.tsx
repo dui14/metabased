@@ -3,7 +3,7 @@
 import { MainLayout } from '@/components/layout';
 import { Avatar, Card } from '@/components/common';
 import { Search, Send, MessageSquare, Loader2, ArrowLeft, Settings } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth, useChat } from '@/providers';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -46,14 +46,7 @@ export default function MessagesPage() {
   const [messageSettings, setMessageSettings] = useState<'everyone' | 'following'>('everyone');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (user) {
-      fetchConversations();
-      fetchMessageSettings();
-    }
-  }, [user]);
-
-  const fetchMessageSettings = async () => {
+  const fetchMessageSettings = useCallback(async () => {
     try {
       const token = localStorage.getItem('dynamic_authentication_token');
       const response = await fetch('/api/users/message-settings', {
@@ -68,7 +61,47 @@ export default function MessagesPage() {
     } catch (error) {
       console.error('Error fetching message settings:', error);
     }
-  };
+  }, []);
+
+  const fetchConversations = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/conversations?user_id=${user?.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setConversations(data.conversations || []);
+        return data.conversations || [];
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching conversations:', error);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.id]);
+
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    try {
+      const response = await fetch(`/api/messages?conversation_id=${conversationId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data.messages || []);
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchConversations();
+      fetchMessageSettings();
+    }
+  }, [user, fetchConversations, fetchMessageSettings]);
 
   const updateMessageSettings = async (newSetting: 'everyone' | 'following') => {
     try {
@@ -97,43 +130,26 @@ export default function MessagesPage() {
       subscribeToConversation(selectedConversation.id);
       markAsRead(selectedConversation.id);
     }
-    
+
     return () => {
       unsubscribeFromConversation();
     };
-  }, [selectedConversation]);
+  }, [selectedConversation, fetchMessages, subscribeToConversation, markAsRead, unsubscribeFromConversation]);
 
   useEffect(() => {
     if (realtimeMessages.length > 0) {
       setMessages((prev) => {
-        const existingIds = new Set(prev.map(m => m.id));
-        const newMessages = realtimeMessages.filter(m => !existingIds.has(m.id));
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newMessages = realtimeMessages.filter((m) => !existingIds.has(m.id));
         return [...prev, ...newMessages];
       });
       scrollToBottom();
     }
-  }, [realtimeMessages]);
+  }, [realtimeMessages, scrollToBottom]);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
-
-  const fetchConversations = async () => {
-    try {
-      const response = await fetch(`/api/conversations?user_id=${user?.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setConversations(data.conversations || []);
-        return data.conversations || [];
-      }
-      return [];
-    } catch (error) {
-      console.error('Error fetching conversations:', error);
-      return [];
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     const initConversationWithUser = async () => {
@@ -141,7 +157,7 @@ export default function MessagesPage() {
 
       try {
         const convs = await fetchConversations();
-        
+
         const existingConv = convs.find(
           (conv: Conversation) => conv.other_username.toLowerCase() === targetUsername.toLowerCase()
         );
@@ -155,13 +171,13 @@ export default function MessagesPage() {
               'Authorization': `Bearer ${token}`,
             },
           });
-          
+
           if (response.ok) {
             const data = await response.json();
             if (data.user) {
               const createResponse = await fetch('/api/conversations', {
                 method: 'POST',
-                headers: { 
+                headers: {
                   'Content-Type': 'application/json',
                   'Authorization': `Bearer ${token}`,
                 },
@@ -182,14 +198,14 @@ export default function MessagesPage() {
                   last_message_at: conversation.created_at || new Date().toISOString(),
                   unread_count: 0,
                 };
-                
+
                 setConversations((prev) => [newConv, ...prev]);
                 setSelectedConversation(newConv);
               }
             }
           }
         }
-        
+
         router.replace('/messages', { scroll: false });
       } catch (error) {
         console.error('Error initializing conversation:', error);
@@ -199,19 +215,7 @@ export default function MessagesPage() {
     if (targetUsername && user) {
       initConversationWithUser();
     }
-  }, [targetUsername, user]);
-
-  const fetchMessages = async (conversationId: string) => {
-    try {
-      const response = await fetch(`/api/messages?conversation_id=${conversationId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages || []);
-      }
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-    }
-  };
+  }, [targetUsername, user, fetchConversations, router]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation || !user) return;
@@ -238,10 +242,6 @@ export default function MessagesPage() {
     } catch (error) {
       console.error('Error sending message:', error);
     }
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const filteredConversations = conversations.filter((conv) =>

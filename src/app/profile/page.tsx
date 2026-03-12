@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Avatar, Button, Card, Badge } from '@/components/common';
@@ -17,10 +17,15 @@ type TabType = 'posts' | 'nfts';
 export default function ProfilePage() {
   const router = useRouter();
   const { user, refreshUser } = useAuth();
+  const refreshUserRef = useRef(refreshUser);
   const { t } = useTheme();
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    refreshUserRef.current = refreshUser;
+  }, [refreshUser]);
 
   useEffect(() => {
     const fetchUserPosts = async () => {
@@ -34,7 +39,7 @@ export default function ProfilePage() {
           setPosts(data.posts || []);
         }
         
-        await refreshUser();
+        await refreshUserRef.current();
       } catch (error) {
         console.log('Error fetching user posts:', error);
       } finally {

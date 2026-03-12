@@ -157,6 +157,7 @@ export const CACHE_KEYS = {
   
   // Notifications
   USER_NOTIFICATIONS: (userId: string) => `notifications:${userId}`,
+  USER_NOTIFICATIONS_UNREAD: (userId: string) => `notifications:unread:${userId}`,
 } as const;
 
 // Cache TTL Presets (milliseconds)
@@ -180,7 +181,7 @@ if (typeof setInterval !== 'undefined') {
   }, 10 * 60 * 1000);
 }
 
-export default {
+const cacheUtils = {
   get: getCache,
   set: setCache,
   delete: deleteCache,
@@ -191,3 +192,5 @@ export default {
   KEYS: CACHE_KEYS,
   TTL: CACHE_TTL,
 };
+
+export default cacheUtils;

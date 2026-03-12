@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
+import { createNotification } from '@/lib/notifications';
+import { CACHE_KEYS, deleteCache, deleteCacheByPrefix } from '@/lib/cache';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -52,6 +54,24 @@ export async function POST(request: NextRequest) {
           'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)',
           [follower_id, following_id]
         );
+
+        try {
+          await createNotification({
+            userId: following_id,
+            type: 'follow',
+            actorId: follower_id,
+            referenceType: 'user',
+            referenceId: follower_id,
+            title: 'New follower',
+            message: 'started following you',
+          });
+
+          deleteCacheByPrefix(CACHE_KEYS.USER_NOTIFICATIONS(following_id));
+          deleteCache(CACHE_KEYS.USER_NOTIFICATIONS_UNREAD(following_id));
+        } catch (notificationError) {
+          console.error('Error creating follow notification (local DB):', notificationError);
+        }
+
         return NextResponse.json({ success: true, action: 'followed' });
       }
     }
@@ -112,6 +132,23 @@ export async function POST(request: NextRequest) {
           { error: 'Failed to follow' },
           { status: 500 }
         );
+      }
+
+      try {
+        await createNotification({
+          userId: following_id,
+          type: 'follow',
+          actorId: follower_id,
+          referenceType: 'user',
+          referenceId: follower_id,
+          title: 'New follower',
+          message: 'started following you',
+        });
+
+        deleteCacheByPrefix(CACHE_KEYS.USER_NOTIFICATIONS(following_id));
+        deleteCache(CACHE_KEYS.USER_NOTIFICATIONS_UNREAD(following_id));
+      } catch (notificationError) {
+        console.error('Error creating follow notification (supabase):', notificationError);
       }
 
       return NextResponse.json({ success: true, action: 'followed' });
