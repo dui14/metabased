@@ -125,11 +125,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             hasRedirectedRef.current = true;
             
             setTimeout(() => {
-              if (existingUser.role === 'admin') {
-                window.location.href = '/admin';
-              } else {
-                window.location.href = '/home';
-              }
+              window.location.href = '/home';
             }, 100);
           }
         }
@@ -210,11 +206,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           if (shouldRedirect && window.location.pathname === '/login' && !hasRedirectedRef.current) {
             hasRedirectedRef.current = true;
             setTimeout(() => {
-              if (existingUser.role === 'admin') {
-                window.location.href = '/admin';
-              } else {
-                window.location.href = '/home';
-              }
+              window.location.href = '/home';
             }, 100);
           }
         }

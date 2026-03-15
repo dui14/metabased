@@ -224,6 +224,17 @@ CREATE TABLE IF NOT EXISTS likes (
 CREATE INDEX IF NOT EXISTS idx_likes_post ON likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_likes_user ON likes(user_id);
 
+CREATE TABLE IF NOT EXISTS reposts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, post_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reposts_post ON reposts(post_id);
+CREATE INDEX IF NOT EXISTS idx_reposts_user ON reposts(user_id);
+
 -- FUNCTIONS & TRIGGERS
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -329,6 +340,7 @@ ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reposts ENABLE ROW LEVEL SECURITY;
 
 -- Policy cho users - public read, self update
 CREATE POLICY "Users are viewable by everyone" ON users FOR SELECT USING (true);
@@ -339,6 +351,10 @@ CREATE POLICY "Posts are viewable by everyone" ON posts FOR SELECT USING (visibi
 CREATE POLICY "Users can create posts" ON posts FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
 CREATE POLICY "Users can update own posts" ON posts FOR UPDATE USING (auth.uid()::text = user_id::text);
 CREATE POLICY "Users can delete own posts" ON posts FOR DELETE USING (auth.uid()::text = user_id::text);
+
+CREATE POLICY "Reposts are viewable by everyone" ON reposts FOR SELECT USING (true);
+CREATE POLICY "Users can create reposts" ON reposts FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can delete own reposts" ON reposts FOR DELETE USING (auth.uid()::text = user_id::text);
 
 -- SAMPLE DATA (Optional - for testing)
 /*

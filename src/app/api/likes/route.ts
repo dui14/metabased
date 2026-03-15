@@ -10,8 +10,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { user_id, post_id, action } = body;
 
-    console.log('Like/Unlike request:', { user_id, post_id, action });
-
     if (!user_id || !post_id) {
       return NextResponse.json(
         { error: 'User ID and Post ID are required' },
@@ -47,7 +45,6 @@ export async function POST(request: NextRequest) {
           }
           
           await client.query('COMMIT');
-          console.log('Unliked post successfully');
           return NextResponse.json({ success: true, action: 'unliked' });
         } catch (error) {
           await client.query('ROLLBACK');
@@ -67,7 +64,6 @@ export async function POST(request: NextRequest) {
           
           if (existingLike.rows.length > 0) {
             await client.query('ROLLBACK');
-            console.log('Already liked post');
             return NextResponse.json(
               { success: true, action: 'already_liked' },
               { status: 200 }
@@ -90,7 +86,6 @@ export async function POST(request: NextRequest) {
           );
           
           await client.query('COMMIT');
-          console.log('Liked post successfully');
           return NextResponse.json({ success: true, action: 'liked' });
         } catch (error) {
           await client.query('ROLLBACK');
@@ -125,7 +120,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      console.log('Unliked post successfully');
       return NextResponse.json({ success: true, action: 'unliked' });
     } else {
       const { data: existingLike } = await supabase
@@ -136,7 +130,6 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (existingLike) {
-        console.log('Already liked post');
         return NextResponse.json(
           { success: true, action: 'already_liked' },
           { status: 200 }
@@ -158,7 +151,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      console.log('Liked post successfully');
       return NextResponse.json({ success: true, action: 'liked' });
     }
   } catch (error) {

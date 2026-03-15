@@ -14,7 +14,7 @@ const MobileDrawer = ({ isOpen, onClose }: MobileDrawerProps) => {
   const pathname = usePathname();
 
   const navItems = [
-    { icon: Home, label: 'Home', href: '/' },
+    { icon: Home, label: 'Home', href: '/home' },
     { icon: Search, label: 'Discover', href: '/discover' },
     { icon: Bell, label: 'Notifications', href: '/notifications' },
     { icon: Plus, label: 'Create Post', href: '/create' },

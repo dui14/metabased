@@ -24,6 +24,8 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
   const { t } = useTheme();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
+  const [isReposted, setIsReposted] = useState(false);
+  const [repostsCount, setRepostsCount] = useState(post.reposts_count);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   
@@ -45,6 +47,24 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     };
 
     checkLikeStatus();
+  }, [user?.id, post.id]);
+
+  useEffect(() => {
+    const checkRepostStatus = async () => {
+      if (!user?.id) return;
+
+      try {
+        const response = await fetch(`/api/reposts?user_id=${user.id}&post_id=${post.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsReposted(!!data.isReposted);
+        }
+      } catch (error) {
+        console.error('Error checking repost status:', error);
+      }
+    };
+
+    checkRepostStatus();
   }, [user?.id, post.id]);
 
   useEffect(() => {
@@ -93,6 +113,44 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     }
     
     onLike?.();
+  };
+
+  const handleRepost = async () => {
+    if (!user?.id) {
+      alert('Please login first');
+      return;
+    }
+
+    const newIsReposted = !isReposted;
+    const newRepostsCount = newIsReposted ? repostsCount + 1 : Math.max(repostsCount - 1, 0);
+
+    setIsReposted(newIsReposted);
+    setRepostsCount(newRepostsCount);
+
+    try {
+      const response = await fetch('/api/reposts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          post_id: post.id,
+          action: newIsReposted ? 'repost' : 'unrepost',
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setIsReposted(!newIsReposted);
+        setRepostsCount(repostsCount);
+        alert(data.error || 'Failed to repost');
+      }
+    } catch (error) {
+      setIsReposted(!newIsReposted);
+      setRepostsCount(repostsCount);
+      console.error('Error reposting:', error);
+    }
+
+    onRepost?.();
   };
 
   const handleCopyUrl = async () => {
@@ -148,13 +206,16 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     if (!confirm('Are you sure you want to delete this post?')) return;
     
     try {
-      const token = localStorage.getItem('dynamic_authentication_token');
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('dynamic_authentication_token');
+      const headers: HeadersInit = {};
+
+      if (token && token !== 'null' && token !== 'undefined') {
+        headers.Authorization = `Bearer ${token}`;
+      }
       
       const response = await fetch(`/api/posts/${post.id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
       });
 
       if (response.ok) {
@@ -173,6 +234,13 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
 
   return (
     <Card className="animate-fadeIn" hover>
+      {post.is_repost && (
+        <div className="mb-3 inline-flex items-center gap-2 rounded-lg bg-green-50 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+          <Repeat2 size={14} />
+          <span>Reposted {post.reposted_at ? formatDate(post.reposted_at) : ''}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-3 gap-2">
         <Link href={`/user/${post.user?.username || post.user_id}`} className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
@@ -235,8 +303,18 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
         </div>
       </div>
 
-      {/* Content - Image hoặc Caption */}
+      {/* Content */}
       <Link href={`/post/${post.id}`}>
+        {/* Caption */}
+        {post.caption && (
+          <div className={cn(
+            "text-dark dark:text-white break-words",
+            post.image_url ? "text-sm mb-3 line-clamp-3" : "text-base mb-3 py-2"
+          )}>
+            <p>{post.caption}</p>
+          </div>
+        )}
+
         {/* Image */}
         {post.image_url && (
           <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 mb-3">
@@ -255,16 +333,6 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
                 </Badge>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Caption - hiển thị cho cả post có ảnh và không có ảnh */}
-        {post.caption && (
-          <div className={cn(
-            "text-dark dark:text-white break-words",
-            post.image_url ? "text-sm mb-3 line-clamp-3" : "text-base mb-3 py-2"
-          )}>
-            <p>{post.caption}</p>
           </div>
         )}
       </Link>
@@ -302,6 +370,14 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
       {/* Actions */}
       <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
         <button
+          onClick={onComment}
+          className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
+        >
+          <MessageCircle size={16} className="sm:w-[18px] sm:h-[18px]" />
+          <span className="text-xs sm:text-sm font-medium">{formatNumber(post.comments_count)}</span>
+        </button>
+
+        <button
           onClick={handleLike}
           className={cn(
             'flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors',
@@ -313,23 +389,23 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
         </button>
 
         <button
-          onClick={onComment}
-          className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
-        >
-          <MessageCircle size={16} className="sm:w-[18px] sm:h-[18px]" />
-          <span className="text-xs sm:text-sm font-medium">{formatNumber(post.comments_count)}</span>
-        </button>
-
-        <button
-          onClick={onRepost}
-          className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+          onClick={handleRepost}
+          className={cn(
+            'flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors',
+            isReposted
+              ? 'text-green-600 bg-green-50 dark:bg-green-900/30'
+              : 'text-gray-500 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30'
+          )}
         >
           <Repeat2 size={16} className="sm:w-[18px] sm:h-[18px]" />
-          <span className="text-xs sm:text-sm font-medium">{formatNumber(post.reposts_count)}</span>
+          <span className="text-xs sm:text-sm font-medium">{formatNumber(repostsCount)}</span>
         </button>
 
         <button
-          onClick={onShare}
+          onClick={() => {
+            handleCopyUrl();
+            onShare?.();
+          }}
           className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
         >
           <Share size={16} className="sm:w-[18px] sm:h-[18px]" />

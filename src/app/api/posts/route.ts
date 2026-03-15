@@ -20,11 +20,12 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
     const userId = searchParams.get('user_id');
+    const includeReposts = searchParams.get('include_reposts') === 'true';
     const noCache = searchParams.get('noCache') === 'true';
     
     // Cache key dựa trên params
     const cacheKey = userId 
-      ? `posts:user:${userId}:${limit}:${offset}`
+      ? `posts:user:${userId}:${includeReposts ? 'with-reposts' : 'posts-only'}:${limit}:${offset}`
       : `${CACHE_KEYS.POSTS_FEED}:${limit}:${offset}`;
     
     // Nếu yêu cầu fresh data, xóa cache
@@ -37,7 +38,9 @@ export async function GET(request: NextRequest) {
       cacheKey,
       async () => {
         if (userId) {
-          // Fetch posts của một user cụ thể
+          if (includeReposts) {
+            return await postService.getByUserIdWithReposts(userId, limit, offset);
+          }
           return await postService.getByUserId(userId, limit, offset);
         } else {
           // Fetch feed chung

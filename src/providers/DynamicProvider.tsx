@@ -50,6 +50,7 @@ export const DynamicProvider = ({ children }: DynamicProviderProps) => {
                 
                 // Set cookie cho middleware để có thể check ở server-side
                 document.cookie = `dynamic_authentication_token=${args.authToken}; path=/; max-age=86400; SameSite=Lax`;
+                document.cookie = 'demo_authenticated=true; path=/; max-age=2592000; SameSite=Lax';
                 
                 // Không redirect ngay, để AuthProvider xử lý:
                 // - Kiểm tra xem user đã có cả email và wallet trong DB chưa

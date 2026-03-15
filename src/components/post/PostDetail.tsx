@@ -1,8 +1,8 @@
 'use client';
 
 import { cn, formatDate, formatNumber } from '@/lib/utils';
-import { Avatar, Badge, Button, Card, Input } from '@/components/common';
-import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, ExternalLink, Copy, Check } from 'lucide-react';
+import { Avatar, Badge, Button, Card } from '@/components/common';
+import { Heart, Share, Sparkles, ExternalLink, Check, Repeat2 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -13,17 +13,26 @@ import type { Post, Comment } from '@/types';
 interface PostDetailProps {
   post: Post;
   comments?: Comment[];
+  onCommentAdded?: (comment: Comment) => void;
   onUpdate?: (post: Post) => void;
   onDelete?: () => void;
 }
 
-const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps) => {
+const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }: PostDetailProps) => {
   const router = useRouter();
   const { user } = useAuth();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
+  const [isReposted, setIsReposted] = useState(false);
+  const [repostsCount, setRepostsCount] = useState(post.reposts_count);
   const [newComment, setNewComment] = useState('');
+  const [localComments, setLocalComments] = useState<Comment[]>(comments);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setLocalComments(comments);
+  }, [comments]);
 
   useEffect(() => {
     const checkLikeStatus = async () => {
@@ -41,6 +50,24 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
     };
 
     checkLikeStatus();
+  }, [user?.id, post.id]);
+
+  useEffect(() => {
+    const checkRepostStatus = async () => {
+      if (!user?.id) return;
+
+      try {
+        const response = await fetch(`/api/reposts?user_id=${user.id}&post_id=${post.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsReposted(!!data.isReposted);
+        }
+      } catch (error) {
+        console.log('Error checking repost status:', error);
+      }
+    };
+
+    checkRepostStatus();
   }, [user?.id, post.id]);
 
   const handleLike = async () => {
@@ -80,43 +107,106 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
 
   const copyToClipboard = async () => {
     try {
-      const shareUrl = typeof window !== 'undefined' 
-        ? `${window.location.origin}/post/${post.id}`
-        : '';
-      await navigator.clipboard.writeText(shareUrl);
+      await navigator.clipboard.writeText(post.id);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.log('Error copying to clipboard:', error);
+      console.error('Error copying post id:', error);
+    }
+  };
+
+  const handleRepost = async () => {
+    if (!user?.id) {
+      alert('Please login first');
+      return;
+    }
+
+    const newIsReposted = !isReposted;
+    const newCount = newIsReposted ? repostsCount + 1 : Math.max(repostsCount - 1, 0);
+
+    setIsReposted(newIsReposted);
+    setRepostsCount(newCount);
+
+    try {
+      const response = await fetch('/api/reposts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          post_id: post.id,
+          action: newIsReposted ? 'repost' : 'unrepost',
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setIsReposted(!newIsReposted);
+        setRepostsCount(repostsCount);
+        alert(data.error || 'Failed to repost');
+      }
+    } catch (error) {
+      setIsReposted(!newIsReposted);
+      setRepostsCount(repostsCount);
+      console.log('Error reposting:', error);
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    const content = newComment.trim();
+
+    if (!content) {
+      return;
+    }
+
+    if (!user?.id) {
+      alert('Please login first');
+      return;
+    }
+
+    setIsSubmittingComment(true);
+
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('dynamic_authentication_token');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+
+      if (token && token !== 'null' && token !== 'undefined') {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const response = await fetch('/api/comments', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          post_id: post.id,
+          content,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || 'Failed to add comment');
+        return;
+      }
+
+      if (data.comment) {
+        setLocalComments((prev) => [data.comment, ...prev]);
+        onCommentAdded?.(data.comment);
+      }
+
+      setNewComment('');
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      alert('An error occurred while adding comment');
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
   return (
     <div className="max-w-2xl mx-auto">
-      {/* Main Content */}
-      {post.image_url && (
-        <Card padding="none" className="overflow-hidden mb-4">
-          <div className="relative aspect-square bg-gray-100 dark:bg-gray-800">
-            <Image
-              src={post.image_url}
-              alt={post.caption || 'Post image'}
-              fill
-              className="object-cover"
-              priority
-              unoptimized
-            />
-            {post.is_nft && (
-              <div className="absolute top-4 right-4">
-                <Badge variant="nft" size="md">
-                  <Sparkles size={12} className="mr-1" />
-                  Minted on Base Sepolia
-                </Badge>
-              </div>
-            )}
-          </div>
-        </Card>
-      )}
-
       {/* Creator Info */}
       <Card className="mb-4">
         <div className="flex items-center justify-between">
@@ -137,6 +227,27 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
         {/* Caption */}
         {post.caption && (
           <p className="text-dark dark:text-white mt-4 text-base leading-relaxed">{post.caption}</p>
+        )}
+
+        {post.image_url && (
+          <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 mt-4 rounded-xl overflow-hidden">
+            <Image
+              src={post.image_url}
+              alt={post.caption || 'Post image'}
+              fill
+              className="object-cover"
+              priority
+              unoptimized
+            />
+            {post.is_nft && (
+              <div className="absolute top-4 right-4">
+                <Badge variant="nft" size="md">
+                  <Sparkles size={12} className="mr-1" />
+                  Minted on Base Sepolia
+                </Badge>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Timestamp */}
@@ -161,7 +272,7 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
             <span className="text-gray-500 ml-1">Comments</span>
           </div>
           <div>
-            <span className="font-semibold text-dark dark:text-white">{formatNumber(post.reposts_count)}</span>
+            <span className="font-semibold text-dark dark:text-white">{formatNumber(repostsCount)}</span>
             <span className="text-gray-500 ml-1">Reposts</span>
           </div>
         </div>
@@ -171,7 +282,7 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
           <button
             onClick={handleLike}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-colors font-medium',
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl transition-colors font-medium',
               isLiked ? 'text-red-500 bg-red-50 dark:bg-red-900/30' : 'text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30'
             )}
           >
@@ -180,11 +291,24 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
           </button>
 
           <button
+            onClick={handleRepost}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl transition-colors font-medium',
+              isReposted
+                ? 'text-green-600 bg-green-50 dark:bg-green-900/30'
+                : 'text-gray-500 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30'
+            )}
+          >
+            <Repeat2 size={20} />
+            <span>Repost</span>
+          </button>
+
+          <button
             onClick={copyToClipboard}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors font-medium"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-gray-500 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors font-medium"
           >
             {copied ? <Check size={20} /> : <Share size={20} />}
-            <span>{copied ? 'Copied!' : 'Share'}</span>
+            <span>{copied ? 'Copied Post ID!' : 'Share'}</span>
           </button>
         </div>
       </Card>
@@ -247,7 +371,7 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
 
       {/* Comments Section */}
       <Card>
-        <h3 className="font-semibold text-dark dark:text-white mb-4">Comments ({comments.length})</h3>
+        <h3 className="font-semibold text-dark dark:text-white mb-4">Comments ({localComments.length})</h3>
 
         {/* Comment Input */}
         <div className="flex items-start gap-3 mb-6">
@@ -258,9 +382,15 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               placeholder="Add a comment..."
+              disabled={isSubmittingComment}
               className="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-sm text-dark dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
             />
-            <Button variant="primary" size="md" disabled={!newComment.trim()}>
+            <Button
+              variant="primary"
+              size="md"
+              disabled={!newComment.trim() || isSubmittingComment}
+              onClick={handleSubmitComment}
+            >
               Post
             </Button>
           </div>
@@ -268,7 +398,7 @@ const PostDetail = ({ post, comments = [], onUpdate, onDelete }: PostDetailProps
 
         {/* Comments List */}
         <div className="space-y-4">
-          {comments.map((comment) => (
+          {localComments.map((comment) => (
             <div key={comment.id} className="flex items-start gap-3">
               <Avatar src={comment.user?.avatar_url} alt={comment.user?.username || 'User'} size="sm" />
               <div className="flex-1">

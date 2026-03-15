@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Avatar, Input } from '@/components/common';
+import { Avatar } from '@/components/common';
 import { Send, Search, MoreHorizontal, Phone, Video } from 'lucide-react';
 import { useState } from 'react';
 
@@ -36,7 +36,7 @@ const RightPanel = () => {
   const activeChat = mockChats.find((c) => c.id === selectedChat);
 
   return (
-    <aside className="fixed right-0 top-0 h-screen w-[25%] border-l border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col transition-colors z-50 hidden lg:flex">
+    <aside className="fixed right-0 top-0 h-screen w-[25%] border-l border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 transition-colors z-50 hidden lg:flex lg:flex-col">
       {/* Header */}
       <div className="p-4 border-b border-gray-100 dark:border-gray-800">
         <h2 className="text-lg font-semibold text-dark dark:text-white mb-3">Messages</h2>

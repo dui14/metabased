@@ -4,7 +4,7 @@ Social NFT Marketplace trên Base Sepolia - Chia sẻ khoảnh khắc của bạ
 
 ## Giới thiệu
 
-Metabased là một nền tảng mạng xã hội phi tập trung cho phép người dùng chia sẻ bài đăng, biến chúng thành NFT và giao dịch trên marketplace. Xây dựng trên Base Sepolia testnet với Dynamic Labs authentication và PostgreSQL database.
+Metabased là một nền tảng mạng xã hội phi tập trung cho phép người dùng chia sẻ bài đăng, biến chúng thành NFT và giao dịch trên marketplace. Xây dựng trên Base Sepolia testnet với Dynamic Labs authentication và Supabase PostgreSQL.
 
 ### Tính năng chính
 
@@ -21,7 +21,7 @@ Metabased là một nền tảng mạng xã hội phi tập trung cho phép ngư
 - **Frontend**: Next.js 14 (App Router), React 18, TypeScript
 - **Styling**: Tailwind CSS, Framer Motion
 - **Authentication**: Dynamic Labs (Wallet-based)
-- **Database**: PostgreSQL (Supabase hoặc Local Docker)
+- **Database**: Supabase PostgreSQL
 - **Blockchain**: Base Sepolia Testnet
 - **Smart Contracts**: Solidity (NFT721, NFT1155, Marketplace)
 - **Deployment**: Vercel
@@ -35,11 +35,9 @@ metabased/
 │   ├── nft721.sol
 │   └── nft1155.sol
 ├── database/                   # SQL schemas
-│   ├── postgrelocal.sql       # Local PostgreSQL
-│   └── postgresupabase.sql    # Supabase
+│   └── postgresupabase.sql    # Supabase PostgreSQL
 ├── docs/                       # Documentation
 │   ├── ARCHITECTURE.md        # Kiến trúc hệ thống
-│   ├── LOCAL_SETUP.md         # Hướng dẫn setup local
 │   ├── SUPABASE_SETUP.md      # Hướng dẫn setup Supabase
 │   └── README.md              # File này
 ├── src/                        # Source code
@@ -59,6 +57,16 @@ metabased/
 
 ## Hướng dẫn cài đặt
 
+## Kiến trúc hệ thống
+
+- Frontend: Next.js 14 App Router
+- Backend: Next.js API Routes
+- Database: Supabase PostgreSQL
+- Blockchain: Base Sepolia
+
+Flow:
+Client -> API Routes -> Supabase -> Smart Contracts
+
 ### 1. Clone repository
 
 ```bash
@@ -75,13 +83,8 @@ npm install
 
 ### 3. Cấu hình môi trường
 
-Chọn 1 trong 2 phương pháp:
-
-#### Option A: Supabase (Khuyến nghị cho production)
-Xem hướng dẫn chi tiết tại [SUPABASE_SETUP.md](SUPABASE_SETUP.md)
-
-#### Option B: Local PostgreSQL (Docker)
-Xem hướng dẫn chi tiết tại [LOCAL_SETUP.md](LOCAL_SETUP.md)
+Supabase la bat buoc tu hien tai.
+Xem hướng dẫn chi tiết tại [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md)
 
 ### 4. Chạy ứng dụng
 
@@ -110,9 +113,9 @@ Truy cập: http://localhost:3000
 Khi thay đổi database schema:
 
 1. Cập nhật file SQL trong `database/`
-2. Chạy migration trên local
-3. Test kỹ
-4. Deploy lên Supabase (production)
+2. Chay migration tren Supabase
+3. Test ky
+4. Deploy production sau khi xac nhan data integrity
 
 ## API Documentation
 
@@ -174,8 +177,7 @@ npm run test:e2e
 
 ### Lỗi kết nối database
 - Kiểm tra `.env.local` đã đúng chưa
-- Verify Docker container đang chạy (nếu dùng local)
-- Check Supabase project status (nếu dùng Supabase)
+- Check Supabase project status
 
 ### Lỗi Dynamic Labs
 - Verify `NEXT_PUBLIC_DYNAMIC_ENV_ID` đúng

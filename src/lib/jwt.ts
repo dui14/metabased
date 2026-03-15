@@ -7,6 +7,8 @@ const JWKS_URL = process.env.DYNAMIC_JWKS_URL ||
 // Cache JWKS để không phải fetch mỗi lần
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
+const DYNAMIC_ENV_ID = process.env.NEXT_PUBLIC_DYNAMIC_ENV_ID || '';
+
 function getJWKS() {
   if (!jwks) {
     jwks = createRemoteJWKSet(new URL(JWKS_URL));
@@ -37,18 +39,17 @@ export interface JWTPayload {
  */
 export async function verifyDynamicJWT(token: string): Promise<JWTPayload | null> {
   try {
-    console.log('Verifying JWT token, length:', token?.length);
     const jwks = getJWKS();
-    
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: `https://app.dynamic.xyz/api/v0/environments/${process.env.NEXT_PUBLIC_DYNAMIC_ENV_ID}`,
-      audience: process.env.NEXT_PUBLIC_DYNAMIC_ENV_ID,
-    });
-    
-    console.log('JWT verified successfully');
+
+    const { payload } = await jwtVerify(token, jwks);
+    const envIdFromPayload = typeof payload.environment_id === 'string' ? payload.environment_id : '';
+
+    if (!DYNAMIC_ENV_ID || envIdFromPayload !== DYNAMIC_ENV_ID) {
+      return null;
+    }
+
     return payload as unknown as JWTPayload;
-  } catch (error) {
-    console.log('JWT verification failed:', error instanceof Error ? error.message : error);
+  } catch {
     return null;
   }
 }

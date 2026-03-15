@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
+import { getAuthenticatedUser } from '@/lib/api-auth';
 import { 
   cacheOrFetch,
   deleteCache, 
@@ -273,31 +274,9 @@ export async function DELETE(
   { params }: { params: { postId: string } }
 ) {
   try {
-    const authHeader = request.headers.get('authorization');
-    let token = authHeader?.replace('Bearer ', '');
-    
-    if (!token) {
-      token = request.cookies.get('dynamic_authentication_token')?.value;
-    }
-    
-    console.log('DELETE post request for:', params.postId);
-    console.log('Auth header present:', !!authHeader);
-    console.log('Token present:', !!token);
-    console.log('Token from cookie:', !authHeader && !!token);
-    
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
-    }
+    const currentUser = await getAuthenticatedUser(request);
 
-    const { verifyAndGetUser } = await import('@/lib/jwt');
-    const userInfo = await verifyAndGetUser(token);
-    
-    console.log('User info from token:', userInfo ? 'valid' : 'invalid');
-    
-    if (!userInfo?.walletAddress) {
+    if (!currentUser) {
       return NextResponse.json(
         { error: 'Unauthorized - Invalid token' },
         { status: 401 }
@@ -308,20 +287,6 @@ export async function DELETE(
     
     if (useLocalDb) {
       const { query } = await import('@/lib/db');
-      
-      const userResult = await query(
-        'SELECT id, role FROM users WHERE wallet_address = $1',
-        [userInfo.walletAddress.toLowerCase()]
-      );
-      
-      if (userResult.rows.length === 0) {
-        return NextResponse.json(
-          { error: 'User not found' },
-          { status: 404 }
-        );
-      }
-      
-      const currentUser = userResult.rows[0];
       
       const postResult = await query(
         'SELECT user_id FROM posts WHERE id = $1',
@@ -364,19 +329,6 @@ export async function DELETE(
       );
     }
 
-    const { data: currentUser } = await supabase
-      .from('users')
-      .select('id, role')
-      .eq('wallet_address', userInfo.walletAddress)
-      .single();
-
-    if (!currentUser) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
-    }
-    
     const { data: postToDelete, error: fetchError } = await supabase
       .from('posts')
       .select('user_id')

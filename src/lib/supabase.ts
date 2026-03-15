@@ -350,6 +350,138 @@ export const postService = {
     return data || [];
   },
 
+  async getByUserIdWithReposts(userId: string, limit: number = 20, offset: number = 0): Promise<any[]> {
+    if (useLocalDb) {
+      try {
+        const query = await getDbQuery();
+
+        const ownPostsResult = await query(
+          `SELECT
+            p.*,
+            json_build_object(
+              'id', u.id,
+              'username', u.username,
+              'display_name', u.display_name,
+              'avatar_url', u.avatar_url,
+              'wallet_address', u.wallet_address
+            ) as user,
+            false as is_repost,
+            NULL::timestamp with time zone as reposted_at,
+            NULL::uuid as repost_user_id
+           FROM posts p
+           LEFT JOIN users u ON p.user_id = u.id
+           WHERE p.user_id = $1`,
+          [userId]
+        );
+
+        const repostedPostsResult = await query(
+          `SELECT
+            p.*,
+            json_build_object(
+              'id', u.id,
+              'username', u.username,
+              'display_name', u.display_name,
+              'avatar_url', u.avatar_url,
+              'wallet_address', u.wallet_address
+            ) as user,
+            true as is_repost,
+            r.created_at as reposted_at,
+            r.user_id as repost_user_id
+           FROM reposts r
+           JOIN posts p ON p.id = r.post_id
+           LEFT JOIN users u ON p.user_id = u.id
+           WHERE r.user_id = $1
+             AND p.user_id <> $1
+             AND p.visibility = 'public'`,
+          [userId]
+        );
+
+        const merged = [...ownPostsResult.rows, ...repostedPostsResult.rows]
+          .sort((a, b) => {
+            const aTime = new Date(a.reposted_at || a.created_at).getTime();
+            const bTime = new Date(b.reposted_at || b.created_at).getTime();
+            return bTime - aTime;
+          })
+          .slice(offset, offset + limit);
+
+        return merged;
+      } catch (error) {
+        console.error('Error fetching user posts with reposts:', error);
+        throw error;
+      }
+    }
+
+    const { data: ownPosts, error: ownError } = await supabase!
+      .from('posts')
+      .select(`
+        *,
+        user:users!posts_user_id_fkey (
+          id,
+          username,
+          display_name,
+          avatar_url,
+          wallet_address
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (ownError) {
+      console.error('Error fetching own posts:', ownError);
+      throw ownError;
+    }
+
+    const { data: repostRows, error: repostError } = await supabase!
+      .from('reposts')
+      .select(`
+        created_at,
+        user_id,
+        post:posts!reposts_post_id_fkey (
+          *,
+          user:users!posts_user_id_fkey (
+            id,
+            username,
+            display_name,
+            avatar_url,
+            wallet_address
+          )
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (repostError) {
+      console.error('Error fetching reposts:', repostError);
+      throw repostError;
+    }
+
+    const mappedOwnPosts = (ownPosts || []).map((post) => ({
+      ...post,
+      is_repost: false,
+      reposted_at: null,
+      repost_user_id: null,
+    }));
+
+    const mappedReposts = (repostRows || [])
+      .filter((row: any) => row.post && row.post.user_id !== userId && row.post.visibility === 'public')
+      .map((row: any) => ({
+        ...(row.post as Record<string, unknown>),
+        is_repost: true,
+        reposted_at: row.created_at,
+        repost_user_id: row.user_id,
+      }));
+
+    const merged = [...mappedOwnPosts, ...mappedReposts]
+      .sort((a, b) => {
+        const aTime = new Date((a.reposted_at as string) || (a.created_at as string)).getTime();
+        const bTime = new Date((b.reposted_at as string) || (b.created_at as string)).getTime();
+        return bTime - aTime;
+      })
+      .slice(offset, offset + limit);
+
+    return merged;
+  },
+
   // Create post
   async create(postData: {
     user_id: string;

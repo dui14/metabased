@@ -7,13 +7,14 @@ import { PostDetail } from '@/components/post';
 import { Card } from '@/components/common';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { useTheme } from '@/providers';
-import type { Post } from '@/types';
+import type { Post, Comment } from '@/types';
 
 export default function PostDetailPage({ params }: { params: { postId: string } }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTheme();
   const [post, setPost] = useState<Post | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,32 +26,45 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
         
         const noCache = searchParams.get('noCache') === 'true';
         const url = `/api/posts/${params.postId}${noCache ? '?noCache=true' : ''}`;
-        
-        const response = await fetch(url, {
-          cache: noCache ? 'no-store' : 'default',
-          headers: noCache ? {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          } : {}
-        });
-        
-        if (!response.ok) {
-          if (response.status === 404) {
+
+        const [postResponse, commentsResponse] = await Promise.all([
+          fetch(url, {
+            cache: noCache ? 'no-store' : 'default',
+            headers: noCache ? {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            } : {}
+          }),
+          fetch(`/api/comments?post_id=${params.postId}&limit=50&offset=0`, {
+            cache: 'no-store',
+          }),
+        ]);
+
+        if (!postResponse.ok) {
+          if (postResponse.status === 404) {
             setError('Post not found');
           } else {
             setError('Failed to load post');
           }
-          console.error('Failed to fetch post:', response.status, response.statusText);
+          console.error('Failed to fetch post:', postResponse.status, postResponse.statusText);
           return;
         }
-        
-        const data = await response.json();
-        
-        if (data.post) {
-          setPost(data.post);
+
+        const postData = await postResponse.json();
+
+        if (postData.post) {
+          setPost(postData.post);
         } else {
           setError('Post data not available');
-          console.error('Post data not found in response:', data);
+          console.error('Post data not found in response:', postData);
+          return;
+        }
+
+        if (commentsResponse.ok) {
+          const commentsData = await commentsResponse.json();
+          setComments(commentsData.comments || []);
+        } else {
+          setComments([]);
         }
       } catch (error) {
         console.error('Error fetching post:', error);
@@ -104,6 +118,17 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
     setPost(updatedPost);
   };
 
+  const handleCommentAdded = (newComment: Comment) => {
+    setComments((prev) => [newComment, ...prev]);
+    setPost((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        comments_count: (prev.comments_count || 0) + 1,
+      };
+    });
+  };
+
   const handlePostDelete = () => {
     router.push('/home');
   };
@@ -120,6 +145,8 @@ export default function PostDetailPage({ params }: { params: { postId: string } 
         </button>
         <PostDetail 
           post={post} 
+          comments={comments}
+          onCommentAdded={handleCommentAdded}
           onUpdate={handlePostUpdate}
           onDelete={handlePostDelete}
         />

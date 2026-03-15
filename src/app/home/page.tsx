@@ -3,16 +3,17 @@
 import { MainLayout } from '@/components/layout';
 import { PostCard } from '@/components/post';
 import { Button, Avatar } from '@/components/common';
-import { Image as ImageIcon, Sparkles, TrendingUp, Users, Loader2 } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers';
 import Link from 'next/link';
 import type { Post } from '@/types';
 
 export default function HomePage() {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const router = useRouter();
+  const { user, isAuthenticated } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
-  const [trendingUsers, setTrendingUsers] = useState<Array<{ id: string; username: string; display_name: string; followers_count: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchPosts = async () => {
@@ -44,23 +45,6 @@ export default function HomePage() {
     setPosts(posts.filter(p => p.id !== postId));
     await fetchPosts();
   };
-
-  // Fetch trending users từ Supabase
-  useEffect(() => {
-    const fetchTrendingUsers = async () => {
-      try {
-        const response = await fetch('/api/users/trending');
-        if (response.ok) {
-          const data = await response.json();
-          setTrendingUsers(data.users || []);
-        }
-      } catch (error) {
-        console.error('Error fetching trending users:', error);
-      }
-    };
-
-    fetchTrendingUsers();
-  }, []);
 
   return (
     <MainLayout>
@@ -105,36 +89,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Trending Section - chỉ hiện khi có users */}
-        {trendingUsers.length > 0 && (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-soft p-4 mb-6">
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp size={18} className="text-primary-500" />
-              <h3 className="font-semibold text-dark">Trending Creators</h3>
-            </div>
-            <div className="space-y-3">
-              {trendingUsers.map((trendingUser) => (
-                <Link 
-                  key={trendingUser.id} 
-                  href={`/user/${trendingUser.username}`}
-                  className="flex items-center justify-between hover:bg-gray-50 rounded-xl p-2 -mx-2 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <Avatar alt={trendingUser.display_name || trendingUser.username} size="sm" />
-                    <div>
-                      <p className="text-sm font-semibold text-dark">{trendingUser.display_name || trendingUser.username}</p>
-                      <p className="text-xs text-gray-400">@{trendingUser.username}</p>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-400">
-                    {trendingUser.followers_count} followers
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Feed */}
         <div className="space-y-4">
           {isLoading ? (
@@ -146,6 +100,7 @@ export default function HomePage() {
               <PostCard 
                 key={post.id} 
                 post={post} 
+                onComment={() => router.push(`/post/${post.id}`)}
                 onUpdate={handlePostUpdate}
                 onDelete={handlePostDelete}
               />

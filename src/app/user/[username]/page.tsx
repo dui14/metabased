@@ -56,7 +56,7 @@ export default function UserProfilePage({ params }: { params: { username: string
             setIsFollowing(followData.isFollowing);
           }
           
-          const postsResponse = await fetch(`/api/posts?user_id=${data.user.id}`, {
+          const postsResponse = await fetch(`/api/posts?user_id=${data.user.id}&include_reposts=true`, {
             cache: 'no-store',
             headers: {
               'Cache-Control': 'no-cache',

@@ -23,11 +23,7 @@ const LoginPage = () => {
         setIsRedirecting(true);
         // Đợi 1 chút để UI hiển thị loading
         const timer = setTimeout(() => {
-          if (user.role === 'admin') {
-            router.push('/admin');
-          } else {
-            router.push('/home');
-          }
+          router.push('/home');
         }, 500);
         return () => clearTimeout(timer);
       }

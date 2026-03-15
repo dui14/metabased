@@ -1,19 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { jwtDecode } from 'jwt-decode';
 
 // Các route public không cần đăng nhập
 const publicRoutes = ['/login', '/logout', '/home', '/discover'];
 
 // Các route public có thể xem mà không cần login
 const publicViewRoutes = ['/post/', '/profile/'];
-
-interface JWTPayload {
-  sub?: string;
-  wallet_address?: string;
-  role?: string;
-  exp?: number;
-}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -39,32 +31,6 @@ export function middleware(request: NextRequest) {
     const loginUrl = new URL('/login', request.url);
     // Không thêm redirect param nữa
     return NextResponse.redirect(loginUrl);
-  }
-
-  // Kiểm tra quyền admin
-  if (pathname.startsWith('/admin')) {
-    let isAdmin = false;
-    
-    // Kiểm tra role từ JWT token
-    if (authToken) {
-      try {
-        const decoded = jwtDecode<JWTPayload>(authToken);
-        isAdmin = decoded.role === 'admin';
-      } catch (e) {
-        console.error('Error decoding JWT:', e);
-      }
-    }
-    
-    // Kiểm tra từ cookie (fallback)
-    const userRole = request.cookies.get('user_role')?.value;
-    if (userRole === 'admin') {
-      isAdmin = true;
-    }
-    
-    if (!isAdmin) {
-      // Không có quyền admin, redirect về home
-      return NextResponse.redirect(new URL('/home', request.url));
-    }
   }
 
   return NextResponse.next();

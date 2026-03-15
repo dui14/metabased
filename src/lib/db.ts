@@ -34,22 +34,12 @@ if (useLocalDb) {
     database: process.env.LOCAL_DB_NAME,
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 3000,
   });
 
   // Test connection khi khởi tạo
   pool.on('error', (err) => {
     console.error('Unexpected error on idle PostgreSQL client', err);
-  });
-
-  // Test connection khi khởi tạo
-  pool.query('SELECT NOW()', (err, result) => {
-    if (err) {
-      console.error('❌ Không thể kết nối PostgreSQL local:', err.message);
-      console.error('Kiểm tra PostgreSQL đang chạy và thông tin trong .env.local');
-    } else if (process.env.DEBUG_DB === 'true') {
-      console.log('✅ PostgreSQL connected:', process.env.LOCAL_DB_HOST + ':' + process.env.LOCAL_DB_PORT);
-    }
   });
 }
 

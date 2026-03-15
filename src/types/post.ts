@@ -2,12 +2,15 @@
 export interface Post {
   id: string;
   user_id: string;
-  image_url: string;
-  caption: string;
+  image_url: string | null;
+  caption: string | null;
   visibility: 'public' | 'private';
   likes_count: number;
   comments_count: number;
   reposts_count: number;
+  is_repost?: boolean;
+  reposted_at?: string | null;
+  repost_user_id?: string | null;
   is_nft: boolean;
   nft_token_id?: string;
   nft_price?: string;
