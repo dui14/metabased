@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at DESC);
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type VARCHAR(50) NOT NULL CHECK (type IN ('like', 'comment', 'follow', 'mention', 'nft_sold', 'nft_offer', 'system')),
+    type VARCHAR(50) NOT NULL CHECK (type IN ('like', 'comment', 'follow', 'repost', 'message', 'mention', 'nft_sold', 'nft_offer', 'system')),
     title VARCHAR(200),
     message TEXT,
     reference_id UUID,
