@@ -239,7 +239,7 @@ export default function CreatePostPage() {
               }`}
             >
               <span
-                className={`absolute top-0.5 sm:top-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                className={`absolute left-0.5 sm:left-1 top-0.5 sm:top-1 w-4 h-4 bg-white rounded-full transition-transform ${
                   mintAsNFT ? 'translate-x-5 sm:translate-x-7' : 'translate-x-0.5 sm:translate-x-1'
                 }`}
               />

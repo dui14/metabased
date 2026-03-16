@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/api-auth';
 import { CACHE_KEYS, deleteCache, deleteCacheByPrefix } from '@/lib/cache';
+import { createNotification } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -153,13 +154,15 @@ export async function POST(request: NextRequest) {
     if (useLocalDb) {
       const { query } = await import('@/lib/db');
 
-      const postResult = await query('SELECT id FROM posts WHERE id = $1 LIMIT 1', [postId]);
+      const postResult = await query('SELECT id, user_id FROM posts WHERE id = $1 LIMIT 1', [postId]);
       if (postResult.rows.length === 0) {
         return NextResponse.json(
           { error: 'Post not found' },
           { status: 404 }
         );
       }
+
+      const postOwnerId = postResult.rows[0].user_id as string;
 
       const insertResult = await query(
         `INSERT INTO comments (post_id, user_id, content, parent_id)
@@ -178,6 +181,20 @@ export async function POST(request: NextRequest) {
       deleteCache(`post:${postId}`);
       deleteCacheByPrefix(CACHE_KEYS.POSTS_FEED);
       deleteCacheByPrefix(`posts:user:${currentUser.id}`);
+
+      try {
+        await createNotification({
+          userId: postOwnerId,
+          actorId: currentUser.id,
+          type: 'comment',
+          title: 'New comment',
+          message: 'commented on your post',
+          referenceType: 'post',
+          referenceId: postId,
+        });
+      } catch (notificationError) {
+        console.error('Error creating comment notification:', notificationError);
+      }
 
       return NextResponse.json(
         {
@@ -201,7 +218,7 @@ export async function POST(request: NextRequest) {
 
     const { data: post, error: postError } = await supabase
       .from('posts')
-      .select('id')
+      .select('id, user_id')
       .eq('id', postId)
       .single();
 
@@ -243,6 +260,20 @@ export async function POST(request: NextRequest) {
     deleteCache(`post:${postId}`);
     deleteCacheByPrefix(CACHE_KEYS.POSTS_FEED);
     deleteCacheByPrefix(`posts:user:${currentUser.id}`);
+
+    try {
+      await createNotification({
+        userId: post.user_id,
+        actorId: currentUser.id,
+        type: 'comment',
+        title: 'New comment',
+        message: 'commented on your post',
+        referenceType: 'post',
+        referenceId: postId,
+      });
+    } catch (notificationError) {
+      console.error('Error creating comment notification:', notificationError);
+    }
 
     return NextResponse.json(
       { comment, success: true },

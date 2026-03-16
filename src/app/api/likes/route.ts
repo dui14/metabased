@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
+import { createNotification } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,6 +57,18 @@ export async function POST(request: NextRequest) {
         const client = await getClient();
         try {
           await client.query('BEGIN');
+
+          const postOwnerResult = await client.query(
+            'SELECT user_id FROM posts WHERE id = $1 LIMIT 1',
+            [post_id]
+          );
+
+          if (postOwnerResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return NextResponse.json({ error: 'Post not found' }, { status: 404 });
+          }
+
+          const postOwnerId = postOwnerResult.rows[0].user_id as string;
           
           const existingLike = await client.query(
             'SELECT id FROM likes WHERE user_id = $1 AND post_id = $2',
@@ -86,6 +99,21 @@ export async function POST(request: NextRequest) {
           );
           
           await client.query('COMMIT');
+
+          try {
+            await createNotification({
+              userId: postOwnerId,
+              actorId: user_id,
+              type: 'like',
+              title: 'New like',
+              message: 'liked your post',
+              referenceType: 'post',
+              referenceId: post_id,
+            });
+          } catch (notificationError) {
+            console.error('Error creating like notification:', notificationError);
+          }
+
           return NextResponse.json({ success: true, action: 'liked' });
         } catch (error) {
           await client.query('ROLLBACK');
@@ -97,12 +125,21 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createServerSupabaseClient();
-
     if (!supabase) {
       return NextResponse.json(
         { error: 'Database not configured' },
         { status: 500 }
       );
+    }
+
+    const { data: postOwner } = await supabase
+      .from('posts')
+      .select('user_id')
+      .eq('id', post_id)
+      .single();
+
+    if (!postOwner) {
+      return NextResponse.json({ error: 'Post not found' }, { status: 404 });
     }
 
     if (action === 'unlike') {
@@ -149,6 +186,20 @@ export async function POST(request: NextRequest) {
           { error: 'Failed to like' },
           { status: 500 }
         );
+      }
+
+      try {
+        await createNotification({
+          userId: postOwner.user_id,
+          actorId: user_id,
+          type: 'like',
+          title: 'New like',
+          message: 'liked your post',
+          referenceType: 'post',
+          referenceId: post_id,
+        });
+      } catch (notificationError) {
+        console.error('Error creating like notification:', notificationError);
       }
 
       return NextResponse.json({ success: true, action: 'liked' });

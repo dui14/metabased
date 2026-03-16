@@ -97,7 +97,7 @@ export interface DbTransaction {
 export interface DbNotification {
   id: string;
   user_id: string;
-  type: 'like' | 'comment' | 'follow' | 'mention' | 'nft_sold' | 'nft_offer' | 'system';
+  type: 'like' | 'comment' | 'follow' | 'repost' | 'message' | 'mention' | 'nft_sold' | 'nft_offer' | 'system';
   title: string | null;
   message: string | null;
   reference_id: string | null;

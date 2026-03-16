@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
 import { deleteCache, deleteCacheByPrefix, CACHE_KEYS } from '@/lib/cache';
+import { createNotification } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -106,6 +107,21 @@ export async function POST(request: NextRequest) {
         );
 
         await client.query('COMMIT');
+
+        try {
+          await createNotification({
+            userId: postOwnerId,
+            actorId: user_id,
+            type: 'repost',
+            title: 'New repost',
+            message: 'reposted your post',
+            referenceType: 'post',
+            referenceId: post_id,
+          });
+        } catch (notificationError) {
+          console.error('Error creating repost notification:', notificationError);
+        }
+
         invalidatePostCaches(post_id, postOwnerId, user_id);
         return NextResponse.json({ success: true, action: 'reposted' });
       } catch (error) {
@@ -205,6 +221,20 @@ export async function POST(request: NextRequest) {
 
     if (updateError) {
       return NextResponse.json({ error: 'Failed to update repost count' }, { status: 500 });
+    }
+
+    try {
+      await createNotification({
+        userId: postData.user_id,
+        actorId: user_id,
+        type: 'repost',
+        title: 'New repost',
+        message: 'reposted your post',
+        referenceType: 'post',
+        referenceId: post_id,
+      });
+    } catch (notificationError) {
+      console.error('Error creating repost notification:', notificationError);
     }
 
     invalidatePostCaches(post_id, postData.user_id, user_id);

@@ -39,6 +39,47 @@ app.prepare().then(() => {
 
   const wss = new WebSocketServer({ port: wsPort });
 
+  pool
+    .connect()
+    .then(async (client) => {
+      await client.query('LISTEN notification_events');
+
+      client.on('notification', (msg) => {
+        if (msg.channel !== 'notification_events' || !msg.payload) {
+          return;
+        }
+
+        try {
+          const payload = JSON.parse(msg.payload);
+          const userId = payload?.user_id as string | undefined;
+
+          if (!userId) {
+            return;
+          }
+
+          const targetWs = userConnections.get(userId);
+          if (targetWs && targetWs.readyState === 1) {
+            targetWs.send(
+              JSON.stringify({
+                type: payload.event || 'notification:new',
+                notification_id: payload.notification_id,
+                notification_type: payload.type,
+              })
+            );
+          }
+        } catch (error) {
+          console.error('Error handling notification event:', error);
+        }
+      });
+
+      client.on('error', (error) => {
+        console.error('Notification listener error:', error);
+      });
+    })
+    .catch((error) => {
+      console.error('Failed to start notification listener:', error);
+    });
+
   wss.on('connection', (ws) => {
     console.log('Client connected to WebSocket');
 

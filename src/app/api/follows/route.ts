@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
+import { createNotification } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -52,6 +53,21 @@ export async function POST(request: NextRequest) {
           'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)',
           [follower_id, following_id]
         );
+
+        try {
+          await createNotification({
+            userId: following_id,
+            actorId: follower_id,
+            type: 'follow',
+            title: 'New follower',
+            message: 'started following you',
+            referenceType: 'user',
+            referenceId: follower_id,
+          });
+        } catch (notificationError) {
+          console.error('Error creating follow notification:', notificationError);
+        }
+
         return NextResponse.json({ success: true, action: 'followed' });
       }
     }
@@ -112,6 +128,20 @@ export async function POST(request: NextRequest) {
           { error: 'Failed to follow' },
           { status: 500 }
         );
+      }
+
+      try {
+        await createNotification({
+          userId: following_id,
+          actorId: follower_id,
+          type: 'follow',
+          title: 'New follower',
+          message: 'started following you',
+          referenceType: 'user',
+          referenceId: follower_id,
+        });
+      } catch (notificationError) {
+        console.error('Error creating follow notification:', notificationError);
       }
 
       return NextResponse.json({ success: true, action: 'followed' });

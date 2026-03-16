@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
+import { createNotification } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -149,6 +150,20 @@ export async function POST(request: NextRequest) {
 
         await client.query('COMMIT');
 
+        try {
+          await createNotification({
+            userId: receiver_id,
+            actorId: sender_id,
+            type: 'message',
+            title: 'New message',
+            message: 'sent you a message',
+            referenceType: 'conversation',
+            referenceId: conversation_id,
+          });
+        } catch (notificationError) {
+          console.error('Error creating message notification:', notificationError);
+        }
+
         const senderResult = await query(`
           SELECT id, username, display_name, avatar_url
           FROM users
@@ -238,6 +253,20 @@ export async function POST(request: NextRequest) {
         last_message_at: message.created_at,
       })
       .eq('id', conversation_id);
+
+    try {
+      await createNotification({
+        userId: receiver_id,
+        actorId: sender_id,
+        type: 'message',
+        title: 'New message',
+        message: 'sent you a message',
+        referenceType: 'conversation',
+        referenceId: conversation_id,
+      });
+    } catch (notificationError) {
+      console.error('Error creating message notification:', notificationError);
+    }
 
     return NextResponse.json({ message });
   } catch (error) {

@@ -19,12 +19,30 @@ const MainLayout = ({
   showBottomNav = true,
 }: MainLayoutProps) => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem('sidebar-collapsed');
     if (stored === 'true') {
       setIsSidebarCollapsed(true);
     }
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const syncViewport = () => {
+      const isMobile = mediaQuery.matches;
+      setIsMobileViewport(isMobile);
+      if (!isMobile) {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+    syncViewport();
+    mediaQuery.addEventListener('change', syncViewport);
+    return () => {
+      mediaQuery.removeEventListener('change', syncViewport);
+    };
   }, []);
 
   const handleToggleSidebar = () => {
@@ -35,12 +53,39 @@ const MainLayout = ({
     });
   };
 
+  const effectiveCollapsed = isMobileViewport ? false : isSidebarCollapsed;
+
   return (
     <div className="min-h-screen bg-white">
       {showSidebar && (
+        <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen((prev) => !prev)}
+          className={`fixed left-4 top-4 z-50 inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-xl text-gray-700 shadow-sm md:hidden ${
+            isMobileSidebarOpen ? 'hidden' : ''
+          }`}
+          aria-label={isMobileSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          aria-expanded={isMobileSidebarOpen}
+        >
+          ☰
+        </button>
+      )}
+
+      {showSidebar && isMobileSidebarOpen && (
+        <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-black/30 md:hidden"
+          aria-label="Close sidebar overlay"
+        />
+      )}
+
+      {showSidebar && (
         <Sidebar
-          collapsed={isSidebarCollapsed}
+          collapsed={effectiveCollapsed}
           onToggleCollapse={handleToggleSidebar}
+          mobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
       )}
       
@@ -49,7 +94,7 @@ const MainLayout = ({
           ${showSidebar ? (isSidebarCollapsed ? 'md:ml-20' : 'md:ml-72') : ''}
           ${showRightPanel ? 'lg:mr-[25%]' : ''}
           ${showBottomNav ? 'pb-20' : ''}
-          min-h-screen transition-all duration-300
+          min-h-screen transition-[margin] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]
         `}
       >
         {children}
