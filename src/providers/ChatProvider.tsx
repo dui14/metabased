@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { useAuth } from './AuthProvider';
 import { createClient } from '@supabase/supabase-js';
+import { emitMessagesUpdated } from '@/lib/useMessageUnreadCount';
 
 const useLocalDb = process.env.NEXT_PUBLIC_USE_LOCAL_DB === 'true';
 
@@ -43,8 +44,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const supabaseChannelRef = useRef<any>(null);
+  const currentConversationIdRef = useRef<string | null>(null);
 
-  const sendMessage = async (conversationId: string, receiverId: string, content: string) => {
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
+
+  const sendMessage = useCallback(async (conversationId: string, receiverId: string, content: string) => {
     if (!user) return;
 
     try {
@@ -68,6 +74,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       const data = await response.json();
       console.log('Message sent successfully:', data.message);
+      emitMessagesUpdated();
       
       if (useLocalDb && wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
@@ -80,22 +87,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       console.error('Error sending message:', error);
       throw error;
     }
-  };
+  }, [user]);
 
-  const markAsRead = async (conversationId: string) => {
+  const markAsRead = useCallback(async (conversationId: string) => {
     if (!user) return;
 
-    await fetch('/api/messages', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        user_id: user.id,
-      }),
-    });
-  };
+    try {
+      const response = await fetch('/api/messages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          user_id: user.id,
+        }),
+      });
 
-  const subscribeToConversation = (conversationId: string) => {
+      if (!response.ok) {
+        console.error('Failed to mark messages as read:', response.status);
+        return;
+      }
+
+      emitMessagesUpdated();
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+    }
+  }, [user]);
+
+  const subscribeToConversation = useCallback((conversationId: string) => {
     setCurrentConversationId(conversationId);
     setMessages([]);
 
@@ -133,9 +151,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       supabaseChannelRef.current = channel;
     }
-  };
+  }, [user?.id]);
 
-  const unsubscribeFromConversation = () => {
+  const unsubscribeFromConversation = useCallback(() => {
     if (useLocalDb && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'leave',
@@ -147,7 +165,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     
     setCurrentConversationId(null);
-  };
+  }, [currentConversationId]);
 
   useEffect(() => {
     if (!user) return;
@@ -168,9 +186,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const data = JSON.parse(event.data);
           
           if (data.type === 'message' && data.message) {
-            if (data.message.sender_id !== user.id) {
-              setMessages((prev) => [...prev, data.message]);
+            const isIncoming = data.message.sender_id !== user.id;
+            const isCurrentConversation = currentConversationIdRef.current === data.message.conversation_id;
+            const isVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+
+            if (!isIncoming) {
+              return;
             }
+
+            if (isCurrentConversation) {
+              setMessages((prev) => {
+                const alreadyExists = prev.some((message) => message.id === data.message.id);
+                return alreadyExists ? prev : [...prev, data.message];
+              });
+
+              if (isVisible) {
+                void markAsRead(data.message.conversation_id);
+                return;
+              }
+            }
+
+            emitMessagesUpdated();
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -197,7 +233,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         supabase?.removeChannel(supabaseChannelRef.current);
       }
     };
-  }, [user]);
+  }, [markAsRead, user]);
 
   return (
     <ChatContext.Provider

@@ -91,7 +91,7 @@ export default function NotificationsPage() {
       }
 
       const data = (await response.json()) as NotificationsResponse;
-      setNotifications(Array.isArray(data.items) ? data.items : []);
+      setNotifications(Array.isArray(data.items) ? data.items.filter((item) => item.type !== 'message') : []);
       emitNotificationsUpdated();
     } catch {
       setNotifications([]);

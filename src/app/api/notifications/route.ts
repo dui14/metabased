@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       cursor,
       limit,
+      excludeTypes: ['message'],
     });
 
     return NextResponse.json(result);

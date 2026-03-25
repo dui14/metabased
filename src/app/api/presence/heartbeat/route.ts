@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/api-auth';
-import { getNotificationUnreadCount } from '@/lib/notifications';
+import { markUserOnline } from '@/lib/presence';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const unread_count = await getNotificationUnreadCount(user.id, { excludeTypes: ['message'] });
-    return NextResponse.json({ unread_count });
+    markUserOnline(user.id);
+    return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error('Error in GET /api/notifications/unread-count:', error);
+    console.error('Error in POST /api/presence/heartbeat:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -1,34 +1,15 @@
 'use client';
 
 import { MainLayout } from '@/components/layout';
-import { Avatar, Card } from '@/components/common';
+import { Avatar } from '@/components/common';
 import { Search, Send, MessageSquare, Loader2, ArrowLeft, Settings } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth, useChat } from '@/providers';
 import { useRouter, useSearchParams } from 'next/navigation';
-
-interface Conversation {
-  id: string;
-  other_user_id: string;
-  other_username: string;
-  other_display_name: string;
-  other_avatar_url: string;
-  last_message_at: string;
-  unread_count: number;
-}
-
-interface Message {
-  id: string;
-  conversation_id: string;
-  sender_id: string;
-  content: string;
-  created_at: string;
-  sender?: {
-    username: string;
-    display_name: string;
-  };
-}
+import { emitMessagesUpdated } from '@/lib/useMessageUnreadCount';
+import type { ConversationMessage as Message, ConversationSummary as Conversation } from '@/lib/messaging-types';
+import { useMessagingCenter } from '@/lib/useMessagingCenter';
 
 export default function MessagesPage() {
   const { user } = useAuth();
@@ -36,19 +17,47 @@ export default function MessagesPage() {
   const searchParams = useSearchParams();
   const targetUsername = searchParams.get('to');
   const { messages: realtimeMessages, sendMessage, subscribeToConversation, unsubscribeFromConversation, markAsRead } = useChat();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [newMessage, setNewMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [messageSettings, setMessageSettings] = useState<'everyone' | 'following'>('everyone');
+  const selectedConversationId = selectedConversation?.id ?? null;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const {
+    conversations,
+    presenceByUserId,
+    isLoading,
+    fetchConversations,
+    fetchMessages,
+    setConversations,
+    markConversationReadLocally,
+  } = useMessagingCenter({
+    userId: user?.id,
+    enabled: Boolean(user),
+    selectedConversationId: selectedConversation?.id || null,
+  });
+
+  const loadConversationMessages = useCallback(async (
+    conversationId: string,
+    options?: { showLoading?: boolean }
+  ) => {
+    if (options?.showLoading !== false) {
+      setIsMessagesLoading(true);
+    }
+
+    try {
+      const nextMessages = await fetchMessages(conversationId);
+      setMessages(nextMessages);
+    } finally {
+      setIsMessagesLoading(false);
+    }
+  }, [fetchMessages]);
 
   useEffect(() => {
     if (user) {
-      fetchConversations();
       fetchMessageSettings();
     }
   }, [user]);
@@ -91,49 +100,59 @@ export default function MessagesPage() {
   };
 
   useEffect(() => {
-    if (selectedConversation) {
+    if (selectedConversationId) {
+      void loadConversationMessages(selectedConversationId);
+      subscribeToConversation(selectedConversationId);
+      void markAsRead(selectedConversationId);
+      markConversationReadLocally(selectedConversationId);
+    } else {
       setMessages([]);
-      fetchMessages(selectedConversation.id);
-      subscribeToConversation(selectedConversation.id);
-      markAsRead(selectedConversation.id);
+      setIsMessagesLoading(false);
     }
     
     return () => {
       unsubscribeFromConversation();
     };
-  }, [selectedConversation]);
+  }, [loadConversationMessages, markAsRead, markConversationReadLocally, selectedConversationId, subscribeToConversation, unsubscribeFromConversation]);
 
   useEffect(() => {
-    if (realtimeMessages.length > 0) {
-      setMessages((prev) => {
-        const existingIds = new Set(prev.map(m => m.id));
-        const newMessages = realtimeMessages.filter(m => !existingIds.has(m.id));
-        return [...prev, ...newMessages];
-      });
-      scrollToBottom();
+    if (!selectedConversationId || realtimeMessages.length === 0) {
+      return;
     }
-  }, [realtimeMessages]);
+
+    setMessages((prev) => {
+      const existingIds = new Set(prev.map((message) => message.id));
+      const newMessages = realtimeMessages.filter((message) => (
+        message.conversation_id === selectedConversationId && !existingIds.has(message.id)
+      ));
+
+      return newMessages.length > 0 ? [...prev, ...newMessages] : prev;
+    });
+
+    void fetchConversations();
+  }, [fetchConversations, realtimeMessages, selectedConversationId]);
+
+  useEffect(() => {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadConversationMessages(selectedConversationId, {
+          showLoading: false,
+        });
+      }
+    }, 2000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loadConversationMessages, selectedConversationId]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  const fetchConversations = async () => {
-    try {
-      const response = await fetch(`/api/conversations?user_id=${user?.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setConversations(data.conversations || []);
-        return data.conversations || [];
-      }
-      return [];
-    } catch (error) {
-      console.error('Error fetching conversations:', error);
-      return [];
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   useEffect(() => {
     const initConversationWithUser = async () => {
@@ -199,19 +218,7 @@ export default function MessagesPage() {
     if (targetUsername && user) {
       initConversationWithUser();
     }
-  }, [targetUsername, user]);
-
-  const fetchMessages = async (conversationId: string) => {
-    try {
-      const response = await fetch(`/api/messages?conversation_id=${conversationId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages || []);
-      }
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-    }
-  };
+  }, [fetchConversations, router, targetUsername, user]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation || !user) return;
@@ -235,6 +242,8 @@ export default function MessagesPage() {
 
     try {
       await sendMessage(selectedConversation.id, selectedConversation.other_user_id, content);
+      await fetchConversations();
+      emitMessagesUpdated();
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -332,7 +341,13 @@ export default function MessagesPage() {
                   <Avatar src={conv.other_avatar_url} alt={conv.other_display_name} size="md" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-dark truncate">{conv.other_display_name}</p>
-                    <p className="text-xs text-gray-500 truncate">@{conv.other_username}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      @{conv.other_username}
+                      <span className={cn('ml-2 inline-flex items-center gap-1', presenceByUserId[conv.other_user_id]?.is_online ? 'text-green-600' : 'text-gray-400')}>
+                        <span className={cn('inline-block h-2 w-2 rounded-full', presenceByUserId[conv.other_user_id]?.is_online ? 'bg-green-500' : 'bg-gray-300')} />
+                        {presenceByUserId[conv.other_user_id]?.is_online ? 'Online' : 'Offline'}
+                      </span>
+                    </p>
                   </div>
                   {conv.unread_count > 0 && (
                     <span className="w-5 h-5 bg-primary-400 text-white text-xs rounded-full flex items-center justify-center">
@@ -359,13 +374,23 @@ export default function MessagesPage() {
                   <Avatar src={selectedConversation.other_avatar_url} alt={selectedConversation.other_display_name} size="md" />
                   <div>
                     <p className="font-semibold text-dark">{selectedConversation.other_display_name}</p>
-                    <p className="text-sm text-gray-400">@{selectedConversation.other_username}</p>
+                    <p className="text-sm text-gray-400">
+                      @{selectedConversation.other_username}
+                      <span className={cn('ml-2 inline-flex items-center gap-1', presenceByUserId[selectedConversation.other_user_id]?.is_online ? 'text-green-600' : 'text-gray-400')}>
+                        <span className={cn('inline-block h-2 w-2 rounded-full', presenceByUserId[selectedConversation.other_user_id]?.is_online ? 'bg-green-500' : 'bg-gray-300')} />
+                        {presenceByUserId[selectedConversation.other_user_id]?.is_online ? 'Online' : 'Offline'}
+                      </span>
+                    </p>
                   </div>
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                {messages.map((msg) => {
+                {isMessagesLoading ? (
+                  <div className="flex h-full items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary-400" />
+                  </div>
+                ) : messages.length > 0 ? messages.map((msg) => {
                   const isMe = msg.sender_id === user?.id;
                   return (
                     <div key={msg.id} className={cn('flex', isMe ? 'justify-end' : 'justify-start')}>
@@ -389,7 +414,13 @@ export default function MessagesPage() {
                       </div>
                     </div>
                   );
-                })}
+                }) : (
+                  <div className="flex h-full flex-col items-center justify-center text-center text-gray-400">
+                    <MessageSquare size={48} className="mb-3 text-gray-300" />
+                    <p className="text-sm font-medium text-gray-500">Chua co tin nhan nao</p>
+                    <p className="mt-1 text-xs">Hay gui tin nhan dau tien trong cuoc tro chuyen nay.</p>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
 

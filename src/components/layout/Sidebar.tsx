@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers';
 import { Avatar } from '@/components/common';
 import { useNotificationUnreadCount } from '@/lib/useNotificationUnreadCount';
+import { useMessageUnreadCount } from '@/lib/useMessageUnreadCount';
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -19,6 +20,10 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
   const pathname = usePathname();
   const { user } = useAuth();
   const { unreadCount } = useNotificationUnreadCount({ enabled: Boolean(user) });
+  const { unreadCount: messageUnreadCount } = useMessageUnreadCount(user?.id, {
+    enabled: Boolean(user),
+    pollingMs: 2500,
+  });
 
   const navItems = [
     { icon: Home, label: 'Home', href: '/home' },
@@ -120,6 +125,16 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
                         {unreadCount > 99 ? '99+' : unreadCount}
                       </span>
                     )}
+                    {item.href === '/messages' && messageUnreadCount > 0 && collapsed && (
+                      <span
+                        className={cn(
+                          'absolute flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-primary-500 px-1 text-[10px] font-semibold leading-none text-white',
+                          '-right-2 -top-2'
+                        )}
+                      >
+                        {messageUnreadCount > 99 ? '99+' : messageUnreadCount}
+                      </span>
+                    )}
                   </span>
                   <span
                     className={cn(
@@ -132,6 +147,11 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
                   {item.href === '/notifications' && unreadCount > 0 && !collapsed && (
                     <span className="ml-auto inline-flex min-w-[22px] h-[22px] items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white">
                       {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                  {item.href === '/messages' && messageUnreadCount > 0 && !collapsed && (
+                    <span className="ml-auto inline-flex min-w-[22px] h-[22px] items-center justify-center rounded-full bg-primary-500 px-1.5 text-xs font-semibold text-white">
+                      {messageUnreadCount > 99 ? '99+' : messageUnreadCount}
                     </span>
                   )}
                   {collapsed && (

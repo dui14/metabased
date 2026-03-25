@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS='--max-old-space-size=2500' next dev",
-    "dev:turbo": "cross-env NODE_OPTIONS='--max-old-space-size=2500' next dev --turbo",
-    "build": "cross-env NODE_OPTIONS='--max-old-space-size=2500' next build",
+    "dev": "cross-env NODE_OPTIONS='--max-old-space-size=6144' node server-ws.mjs",
+    "dev:turbo": "cross-env NODE_OPTIONS='--max-old-space-size=6144' next dev --turbo",
+    "ws": "node server-ws.mjs",
+    "build": "cross-env NODE_OPTIONS='--max-old-space-size=6144' next build",
     "start": "next start",
     "lint": "next lint"
   },

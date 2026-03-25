@@ -40,6 +40,10 @@ export interface CreateNotificationInput {
   referenceId?: string | null;
 }
 
+interface NotificationQueryOptions {
+  excludeTypes?: string[];
+}
+
 const UNREAD_CACHE_PREFIX = 'notifications:unread:';
 
 function getUnreadCacheKey(userId: string) {
@@ -301,8 +305,9 @@ export async function createNotification(input: CreateNotificationInput): Promis
   return { created: Boolean(inserted?.id), notificationId: inserted?.id };
 }
 
-export async function getNotificationUnreadCount(userId: string): Promise<number> {
-  const cacheKey = getUnreadCacheKey(userId);
+export async function getNotificationUnreadCount(userId: string, options?: NotificationQueryOptions): Promise<number> {
+  const excludedTypes = options?.excludeTypes || [];
+  const cacheKey = `${getUnreadCacheKey(userId)}:${excludedTypes.join(',') || 'all'}`;
   const cached = getCache<number>(cacheKey);
   if (cached != null) {
     return cached;
@@ -311,12 +316,21 @@ export async function getNotificationUnreadCount(userId: string): Promise<number
   let unreadCount = 0;
 
   if (isUsingLocalDb()) {
+    const params: any[] = [userId];
+    let excludedSql = '';
+
+    if (excludedTypes.length > 0) {
+      params.push(excludedTypes);
+      excludedSql = ` AND type <> ALL($2::text[])`;
+    }
+
     const result = await query<{ count: number }>(
       `SELECT COUNT(*)::int AS count
        FROM notifications
        WHERE user_id = $1
-         AND is_read = false`,
-      [userId]
+         AND is_read = false
+         ${excludedSql}`,
+      params
     );
     unreadCount = result.rows[0]?.count || 0;
   } else {
@@ -325,11 +339,17 @@ export async function getNotificationUnreadCount(userId: string): Promise<number
       return 0;
     }
 
-    const { count } = await supabase
+    let unreadQuery = supabase
       .from('notifications')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .eq('is_read', false);
+
+    if (excludedTypes.length > 0) {
+      unreadQuery = unreadQuery.not('type', 'in', `(${excludedTypes.join(',')})`);
+    }
+
+    const { count } = await unreadQuery;
 
     unreadCount = count || 0;
   }
@@ -342,10 +362,12 @@ export async function getNotificationsList(input: {
   userId: string;
   cursor?: string | null;
   limit: number;
+  excludeTypes?: string[];
 }): Promise<{ items: NotificationItem[]; next_cursor: string | null; unread_count: number }> {
   const safeLimit = Math.max(1, Math.min(50, input.limit));
   const parsedCursor = decodeCursor(input.cursor || null);
-  const cacheKey = buildListCacheKey(input.userId, safeLimit, input.cursor || null);
+  const excludedTypes = input.excludeTypes || [];
+  const cacheKey = `${buildListCacheKey(input.userId, safeLimit, input.cursor || null)}:${excludedTypes.join(',') || 'all'}`;
   const cached = getCache<{ items: NotificationItem[]; next_cursor: string | null; unread_count: number }>(cacheKey);
   if (cached) {
     return cached;
@@ -357,6 +379,12 @@ export async function getNotificationsList(input: {
   if (isUsingLocalDb()) {
     const params: any[] = [input.userId];
     let cursorSql = '';
+    let excludedSql = '';
+
+    if (excludedTypes.length > 0) {
+      params.push(excludedTypes);
+      excludedSql = ` AND n.type <> ALL($${params.length}::text[])`;
+    }
 
     if (parsedCursor) {
       params.push(parsedCursor.created_at);
@@ -391,6 +419,7 @@ export async function getNotificationsList(input: {
        FROM notifications n
        LEFT JOIN users a ON a.id = n.actor_id
        WHERE n.user_id = $1
+       ${excludedSql}
        ${cursorSql}
        ORDER BY n.created_at DESC, n.id DESC
        LIMIT $${limitParamIndex}`,
@@ -442,6 +471,10 @@ export async function getNotificationsList(input: {
       .order('id', { ascending: false })
       .limit(safeLimit + 1);
 
+    if (excludedTypes.length > 0) {
+      queryBuilder = queryBuilder.not('type', 'in', `(${excludedTypes.join(',')})`);
+    }
+
     if (parsedCursor) {
       queryBuilder = queryBuilder.lt('created_at', parsedCursor.created_at);
     }
@@ -465,7 +498,7 @@ export async function getNotificationsList(input: {
     }
   }
 
-  const unreadCount = await getNotificationUnreadCount(input.userId);
+  const unreadCount = await getNotificationUnreadCount(input.userId, { excludeTypes: excludedTypes });
   const payload = {
     items,
     next_cursor: nextCursor,
