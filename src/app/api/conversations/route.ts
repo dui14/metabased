@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
       const result = await query(`
         SELECT 
           c.*,
+          COALESCE(c.type, 'direct') as type,
           CASE 
             WHEN c.participant_1_id = $1 THEN u2.id
             ELSE u1.id
@@ -55,12 +56,14 @@ export async function GET(request: NextRequest) {
         FROM conversations c
         JOIN users u1 ON c.participant_1_id = u1.id
         JOIN users u2 ON c.participant_2_id = u2.id
-        WHERE c.participant_1_id = $1 OR c.participant_2_id = $1
+        WHERE (c.participant_1_id = $1 OR c.participant_2_id = $1)
+          AND COALESCE(c.type, 'direct') = 'direct'
         ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
       `, [userId]);
 
       return NextResponse.json({ conversations: result.rows });
     }
+
 
     const supabase = createServerSupabaseClient();
     if (!supabase) {
