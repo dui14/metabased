@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "contracts:clean": "npx hardhat clean",
+    "contracts:compile": "npx hardhat compile",
+    "contracts:test": "npx hardhat test",
+    "contracts:deploy:base-sepolia": "npx hardhat run scripts/deploy-base-sepolia.js --network baseSepolia"
+  },
+  "dependencies": {
+    "base-mcp": "^1.0.13"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@openzeppelin/contracts": "^5.6.1",
+    "dotenv": "^17.3.1",
+    "hardhat": "^2.28.6"
+  }
+}
