@@ -73,3 +73,6 @@ fix.txt
 .github/
 src/public/uploads/avatars/*
 src/public/uploads/posts/*
+deployments
+cache
+artifacts
