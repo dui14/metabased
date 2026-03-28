@@ -2,41 +2,76 @@
 
 import { useState } from 'react';
 import { Button, Modal, Badge } from '@/components/common';
-import { Sparkles, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, Check, AlertCircle, HelpCircle } from 'lucide-react';
+import { mintPostOnChain, persistMintedPost, type MintContractType } from '@/lib/nft-mint';
 
 interface MintButtonProps {
   postId: string;
   disabled?: boolean;
-  onMintSuccess?: (tokenId: string) => void;
+  defaultPrice?: string | null;
+  onMintSuccess?: (post: Record<string, unknown>) => void;
 }
 
-type MintStatus = 'idle' | 'preparing' | 'signing' | 'minting' | 'success' | 'error';
+type MintStatus = 'idle' | 'preparing' | 'signing' | 'minting' | 'persisting' | 'success' | 'error';
 
-const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
+const MintButton = ({ postId, disabled, defaultPrice, onMintSuccess }: MintButtonProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<MintStatus>('idle');
-  const [price, setPrice] = useState('0.05');
+  const [price, setPrice] = useState(defaultPrice || '0.05');
+  const [contractType, setContractType] = useState<MintContractType>('ERC721');
+  const [amount1155, setAmount1155] = useState('1');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [mintedTokenId, setMintedTokenId] = useState('');
+  const [txHash, setTxHash] = useState('');
 
   const handleMint = async () => {
-    setStatus('preparing');
-    
-    // Simulate minting process
-    setTimeout(() => setStatus('signing'), 1000);
-    setTimeout(() => setStatus('minting'), 2500);
-    setTimeout(() => {
+    setErrorMessage('');
+    setMintedTokenId('');
+    setTxHash('');
+
+    try {
+      setStatus('preparing');
+      setStatus('signing');
+
+      const amount = contractType === 'ERC1155' ? Number(amount1155) : 1;
+      setStatus('minting');
+
+      const onChainResult = await mintPostOnChain({
+        postId,
+        contractType,
+        amount,
+      });
+
+      setStatus('persisting');
+      const persisted = await persistMintedPost({
+        postId,
+        contractType,
+        contractAddress: onChainResult.contractAddress,
+        tokenId: onChainResult.tokenId,
+        txHash: onChainResult.txHash,
+        nftPrice: price,
+      });
+
+      setMintedTokenId(onChainResult.tokenId);
+      setTxHash(onChainResult.txHash);
       setStatus('success');
-      onMintSuccess?.('12345');
-    }, 5000);
+      onMintSuccess?.(persisted.post);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unknown minting error');
+      setStatus('error');
+    }
   };
 
   const getStatusMessage = () => {
     switch (status) {
       case 'preparing':
-        return 'Preparing transaction...';
+        return 'Preparing wallet and contract call...';
       case 'signing':
         return 'Please sign the transaction in your wallet';
       case 'minting':
         return 'Minting your NFT on Base Sepolia...';
+      case 'persisting':
+        return 'Syncing minted token data to your post...';
       case 'success':
         return 'NFT minted successfully!';
       case 'error':
@@ -63,6 +98,7 @@ const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
         onClose={() => {
           setIsOpen(false);
           setStatus('idle');
+          setErrorMessage('');
         }}
         title="Mint as NFT"
         size="md"
@@ -77,10 +113,73 @@ const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
                 </div>
                 <div>
                   <h4 className="font-semibold text-dark">Create NFT</h4>
-                  <p className="text-sm text-gray-500">Mint your post as an NFT on Base Sepolia</p>
+                  <p className="text-sm text-gray-500">Mint your post on Base Sepolia using ERC-721 or ERC-1155</p>
                 </div>
               </div>
             </div>
+
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Choose NFT standard</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setContractType('ERC721')}
+                  className={`p-3 rounded-xl border text-left transition-colors ${
+                    contractType === 'ERC721'
+                      ? 'border-primary-400 bg-primary-50'
+                      : 'border-gray-200 hover:border-primary-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-semibold text-dark">NFT 721</p>
+                    <span title="ERC-721 la NFT doc nhat, moi token la mot ban duy nhat.">
+                      <HelpCircle
+                        size={16}
+                        className="text-gray-500"
+                      />
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500">1 token = 1 tai san doc ban</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setContractType('ERC1155')}
+                  className={`p-3 rounded-xl border text-left transition-colors ${
+                    contractType === 'ERC1155'
+                      ? 'border-primary-400 bg-primary-50'
+                      : 'border-gray-200 hover:border-primary-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-semibold text-dark">NFT 1155</p>
+                    <span title="ERC-1155 cho phep mint nhieu ban cung mot token id (semi-fungible).">
+                      <HelpCircle
+                        size={16}
+                        className="text-gray-500"
+                      />
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500">1 token id co the co nhieu ban</p>
+                </button>
+              </div>
+            </div>
+
+            {contractType === 'ERC1155' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Amount (ERC-1155)
+                </label>
+                <input
+                  type="number"
+                  value={amount1155}
+                  onChange={(e) => setAmount1155(e.target.value)}
+                  step="1"
+                  min="1"
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -112,12 +211,12 @@ const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
 
             <Button variant="primary" className="w-full" onClick={handleMint}>
               <Sparkles size={16} className="mr-2" />
-              Mint NFT
+              Mint {contractType === 'ERC721' ? 'ERC-721' : 'ERC-1155'}
             </Button>
           </div>
         )}
 
-        {(status === 'preparing' || status === 'signing' || status === 'minting') && (
+        {(status === 'preparing' || status === 'signing' || status === 'minting' || status === 'persisting') && (
           <div className="text-center py-8">
             <Loader2 size={48} className="mx-auto text-primary-500 animate-spin mb-4" />
             <p className="text-dark font-medium">{getStatusMessage()}</p>
@@ -134,6 +233,10 @@ const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
             <p className="text-sm text-gray-500 mb-6">
               Your post is now an NFT on Base Sepolia
             </p>
+            <div className="text-left p-3 bg-gray-50 rounded-xl mb-6 space-y-1">
+              <p className="text-sm text-gray-600">Token ID: <span className="font-semibold text-dark">{mintedTokenId}</span></p>
+              <p className="text-sm text-gray-600 break-all">Tx: <span className="font-mono text-xs text-dark">{txHash}</span></p>
+            </div>
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={() => setIsOpen(false)}>
                 Close
@@ -151,7 +254,10 @@ const MintButton = ({ postId, disabled, onMintSuccess }: MintButtonProps) => {
               <AlertCircle size={32} className="text-red-500" />
             </div>
             <h4 className="text-lg font-semibold text-dark mb-2">Transaction Failed</h4>
-            <p className="text-sm text-gray-500 mb-6">{getStatusMessage()}</p>
+            <p className="text-sm text-gray-500 mb-2">{getStatusMessage()}</p>
+            {errorMessage && (
+              <p className="text-xs text-red-500 mb-6 break-words">{errorMessage}</p>
+            )}
             <Button variant="primary" className="w-full" onClick={handleMint}>
               Try Again
             </Button>

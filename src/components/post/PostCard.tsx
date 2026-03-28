@@ -2,6 +2,7 @@
 
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import { Avatar, Badge, Button, Card } from '@/components/common';
+import { MintButton } from '@/components/nft';
 import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, Eye, EyeOff, Trash2, Link as LinkIcon } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -27,9 +28,17 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
   const [isReposted, setIsReposted] = useState(false);
   const [repostsCount, setRepostsCount] = useState(post.reposts_count);
   const [showMenu, setShowMenu] = useState(false);
+  const [mintedOverride, setMintedOverride] = useState<Partial<Post> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   
   const isOwner = user?.id === post.user_id;
+  const isNft = mintedOverride?.is_nft ?? post.is_nft;
+  const nftStatus = mintedOverride?.nft_status ?? post.nft_status;
+  const nftPrice = mintedOverride?.nft_price ?? post.nft_price;
+
+  useEffect(() => {
+    setMintedOverride(null);
+  }, [post.id]);
 
   useEffect(() => {
     const checkLikeStatus = async () => {
@@ -232,6 +241,12 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     setShowMenu(false);
   };
 
+  const handleMintSuccess = (updatedPost: Record<string, unknown>) => {
+    const normalizedPost = updatedPost as Partial<Post>;
+    setMintedOverride(normalizedPost);
+    onUpdate?.({ ...post, ...normalizedPost } as Post);
+  };
+
   return (
     <Card className="animate-fadeIn" hover>
       {post.is_repost && (
@@ -325,7 +340,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               className="object-cover hover:scale-105 transition-transform duration-300"
               unoptimized
             />
-            {post.is_nft && (
+            {isNft && (
               <div className="absolute top-3 right-3">
                 <Badge variant="nft" size="md">
                   <Sparkles size={12} className="mr-1" />
@@ -338,30 +353,36 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
       </Link>
 
       {/* NFT Section */}
-      {post.is_nft && (
+      {(isNft || isOwner) && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-gradient-to-r from-primary-50 to-orange-50 dark:from-primary-900/30 dark:to-orange-900/30 rounded-xl mb-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center shadow-soft flex-shrink-0">
               <Sparkles size={16} className="text-primary-500" />
             </div>
             <div>
-              <p className="text-xs text-gray-500">Price</p>
-              <p className="font-semibold text-dark dark:text-white text-sm sm:text-base">{post.nft_price || '0.05'} ETH</p>
+              <p className="text-xs text-gray-500">{isNft ? 'Price' : 'NFT Status'}</p>
+              <p className="font-semibold text-dark dark:text-white text-sm sm:text-base">
+                {isNft ? `${nftPrice || '0.05'} ETH` : 'Not minted yet'}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Badge variant="default" size="sm" className="text-xs">
-              Base Sepolia
-            </Badge>
-            {post.nft_status === 'listed' && (
+            {isNft && (
+              <Badge variant="default" size="sm" className="text-xs">
+                Base Sepolia
+              </Badge>
+            )}
+            {nftStatus === 'listed' && (
               <Button size="sm" variant="primary" className="flex-1 sm:flex-none">
                 Buy NFT
               </Button>
             )}
-            {!post.nft_status && (
-              <Button size="sm" variant="outline" className="flex-1 sm:flex-none">
-                Mint as NFT
-              </Button>
+            {!nftStatus && isOwner && (
+              <MintButton
+                postId={post.id}
+                defaultPrice={nftPrice || null}
+                onMintSuccess={handleMintSuccess}
+              />
             )}
           </div>
         </div>

@@ -4,8 +4,9 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Card, Button, Avatar, Badge } from '@/components/common';
-import { Sparkles, X, Upload, ArrowLeft, Loader2 } from 'lucide-react';
+import { Sparkles, X, Upload, ArrowLeft, Loader2, HelpCircle } from 'lucide-react';
 import { useAuth, useTheme } from '@/providers';
+import { mintPostOnChain, persistMintedPost, type MintContractType } from '@/lib/nft-mint';
 
 export default function CreatePostPage() {
   const router = useRouter();
@@ -17,6 +18,8 @@ export default function CreatePostPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [mintAsNFT, setMintAsNFT] = useState(false);
+  const [nftContractType, setNftContractType] = useState<MintContractType>('ERC721');
+  const [nft1155Supply, setNft1155Supply] = useState('1');
   const [nftPrice, setNftPrice] = useState('0.05');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +85,8 @@ export default function CreatePostPage() {
     setIsLoading(true);
     setError(null);
 
+    let createdPostId: string | null = null;
+
     try {
       let imageUrl = '';
       
@@ -100,12 +105,9 @@ export default function CreatePostPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user.id,
           image_url: imageUrl || null,
           caption: caption.trim() || null,
           visibility: 'public',
-          is_nft: mintAsNFT,
-          nft_price: mintAsNFT ? nftPrice : null,
         }),
       });
 
@@ -115,11 +117,41 @@ export default function CreatePostPage() {
         throw new Error(data.error || 'Failed to create post');
       }
 
-      router.push(`/post/${data.post.id}?noCache=true`);
+      const newPostId = data.post.id as string;
+      createdPostId = newPostId;
+
+      if (mintAsNFT) {
+        const amount = nftContractType === 'ERC1155' ? Number(nft1155Supply) : 1;
+
+        const onChainResult = await mintPostOnChain({
+          postId: newPostId,
+          contractType: nftContractType,
+          amount,
+        });
+
+        await persistMintedPost({
+          postId: newPostId,
+          contractType: nftContractType,
+          contractAddress: onChainResult.contractAddress,
+          tokenId: onChainResult.tokenId,
+          txHash: onChainResult.txHash,
+          nftPrice,
+        });
+      }
+
+      router.push(`/post/${newPostId}?noCache=true`);
       router.refresh();
     } catch (err) {
-      console.error('Error creating post:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      console.error('Error creating post/mint:', err);
+      const message = err instanceof Error ? err.message : 'An error occurred';
+
+      if (createdPostId) {
+        setError(`Post was created but mint failed: ${message}`);
+        router.push(`/post/${createdPostId}?noCache=true`);
+        router.refresh();
+      } else {
+        setError(message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -248,6 +280,71 @@ export default function CreatePostPage() {
 
           {mintAsNFT && (
             <div className="pt-4 border-t border-gray-100 dark:border-gray-700 space-y-4 animate-fadeIn">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  NFT Standard
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setNftContractType('ERC721')}
+                    className={`p-3 rounded-xl border text-left transition-colors ${
+                      nftContractType === 'ERC721'
+                        ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="font-semibold text-dark dark:text-white">NFT 721</p>
+                      <span title="ERC-721 la NFT doc nhat, moi token la mot ban duy nhat.">
+                        <HelpCircle
+                          size={16}
+                          className="text-gray-500"
+                        />
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">1 token = 1 tai san doc ban</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNftContractType('ERC1155')}
+                    className={`p-3 rounded-xl border text-left transition-colors ${
+                      nftContractType === 'ERC1155'
+                        ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="font-semibold text-dark dark:text-white">NFT 1155</p>
+                      <span title="ERC-1155 cho phep mint nhieu ban cung mot token id (semi-fungible).">
+                        <HelpCircle
+                          size={16}
+                          className="text-gray-500"
+                        />
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">1 token id co the co nhieu ban</p>
+                  </button>
+                </div>
+              </div>
+
+              {nftContractType === 'ERC1155' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Amount (ERC-1155)
+                  </label>
+                  <input
+                    type="number"
+                    value={nft1155Supply}
+                    onChange={(e) => setNft1155Supply(e.target.value)}
+                    step="1"
+                    min="1"
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-400 text-dark dark:text-white"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   {t('setPrice')}

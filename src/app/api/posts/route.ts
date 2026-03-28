@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postService } from '@/lib/supabase';
+import { createServerSupabaseClient } from '@/lib/supabase';
+import { isUsingLocalDb } from '@/lib/db';
+import { getAuthenticatedUser } from '@/lib/api-auth';
 import { 
   cacheOrFetch, 
   deleteCache, 
@@ -72,16 +75,17 @@ export async function GET(request: NextRequest) {
 // Tạo post mới (hỗ trợ text-only posts)
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    
-    const { user_id, image_url, caption, visibility = 'public', is_nft = false, nft_price = null } = body;
+    const currentUser = await getAuthenticatedUser(request);
 
-    if (!user_id) {
+    if (!currentUser) {
       return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 400 }
+        { error: 'Unauthorized - Invalid token' },
+        { status: 401 }
       );
     }
+
+    const body = await request.json();
+    const { image_url, caption, visibility = 'public' } = body;
 
     // Require at least caption or image
     if (!image_url && !caption) {
@@ -91,19 +95,98 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Tạo post sử dụng postService
-    const post = await postService.create({
-      user_id,
-      image_url: image_url || null,
-      caption: caption || null,
-      visibility,
-      is_nft,
-      nft_price: is_nft ? nft_price : null,
-    });
+    if (!['public', 'private', 'followers'].includes(visibility)) {
+      return NextResponse.json(
+        { error: 'Invalid visibility value' },
+        { status: 400 }
+      );
+    }
+
+    const useLocalDb = isUsingLocalDb();
+    let post: any;
+
+    if (useLocalDb) {
+      const { query } = await import('@/lib/db');
+      const insertResult = await query(
+        `INSERT INTO posts (
+          user_id, image_url, caption, visibility, is_nft, nft_price,
+          likes_count, comments_count, reposts_count
+        ) VALUES ($1, $2, $3, $4, false, null, 0, 0, 0)
+        RETURNING *`,
+        [currentUser.id, image_url || null, caption || null, visibility]
+      );
+
+      if (insertResult.rows.length === 0) {
+        return NextResponse.json(
+          { error: 'Failed to create post' },
+          { status: 500 }
+        );
+      }
+
+      const createdPost = insertResult.rows[0];
+      const userResult = await query(
+        `SELECT id, username, display_name, avatar_url, wallet_address
+         FROM users WHERE id = $1`,
+        [currentUser.id]
+      );
+
+      post = {
+        ...createdPost,
+        user: userResult.rows[0] || null,
+      };
+    } else {
+      const supabase = createServerSupabaseClient();
+
+      if (!supabase) {
+        return NextResponse.json(
+          { error: 'Database not configured' },
+          { status: 500 }
+        );
+      }
+
+      const { data: insertedPost, error: insertError } = await supabase
+        .from('posts')
+        .insert({
+          user_id: currentUser.id,
+          image_url: image_url || null,
+          caption: caption || null,
+          visibility,
+          is_nft: false,
+          nft_price: null,
+          likes_count: 0,
+          comments_count: 0,
+          reposts_count: 0,
+        })
+        .select('*')
+        .single();
+
+      if (insertError || !insertedPost) {
+        console.error('Error creating post:', insertError);
+        return NextResponse.json(
+          { error: 'Failed to create post' },
+          { status: 500 }
+        );
+      }
+
+      const { data: postUser, error: userError } = await supabase
+        .from('users')
+        .select('id, username, display_name, avatar_url, wallet_address')
+        .eq('id', currentUser.id)
+        .single();
+
+      if (userError) {
+        console.error('Error fetching user after post creation:', userError);
+      }
+
+      post = {
+        ...insertedPost,
+        user: postUser || null,
+      };
+    }
 
     // Invalidate cache sau khi tạo post mới
     deleteCacheByPrefix(CACHE_KEYS.POSTS_FEED);
-    deleteCacheByPrefix(`posts:user:${user_id}`);
+    deleteCacheByPrefix(`posts:user:${currentUser.id}`);
 
     return NextResponse.json({ post }, { status: 201 });
   } catch (error) {
