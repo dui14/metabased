@@ -68,9 +68,17 @@
 - Cache header: `s-maxage=30`
 
 ### POST /api/posts
-- Input: `{ user_id, image_url?, caption?, visibility?, is_nft?, nft_price? }`
+- Auth: Bearer token hoac cookie `dynamic_authentication_token`
+- Input: `{ image_url?, caption?, visibility? }`
 - Rule: bat buoc co `image_url` hoac `caption`
 - Output: `{ post }` (201)
+
+### POST /api/posts/[postId]/mint
+- Auth: Bearer token hoac cookie token
+- Input: `{ contract_type: 'ERC721'|'ERC1155', contract_address, token_id, tx_hash?, nft_price? }`
+- Rule: chi owner hoac admin duoc cap nhat mint metadata
+- Output: `{ post, tx_hash, contract_type }`
+- Errors: 400, 401, 403, 404, 409, 500
 
 ### GET /api/posts/[postId]
 - Query: `noCache`
