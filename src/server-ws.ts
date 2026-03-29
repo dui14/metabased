@@ -23,6 +23,35 @@ const pool = new Pool({
 const conversationRooms = new Map<string, Set<any>>();
 const userConnections = new Map<string, any>();
 
+// Helper: broadcast message tới tất cả connected clients
+function broadcastToAll(message: object, excludeWs?: any) {
+  const payload = JSON.stringify(message);
+  userConnections.forEach((ws) => {
+    if (ws !== excludeWs && ws.readyState === 1) {
+      ws.send(payload);
+    }
+  });
+}
+
+// Helper: set online status trong DB
+async function setUserOnlineStatus(userId: string, isOnline: boolean) {
+  try {
+    if (isOnline) {
+      await pool.query(
+        `UPDATE users SET is_online = true WHERE id = $1`,
+        [userId]
+      );
+    } else {
+      await pool.query(
+        `UPDATE users SET is_online = false, last_seen_at = NOW() WHERE id = $1`,
+        [userId]
+      );
+    }
+  } catch (error) {
+    console.error('Error updating online status:', error);
+  }
+}
+
 app.prepare().then(() => {
   createServer(async (req, res) => {
     try {
@@ -83,6 +112,10 @@ app.prepare().then(() => {
   wss.on('connection', (ws) => {
     console.log('Client connected to WebSocket');
 
+    // Heartbeat tracking: stale connections timeout sau 60s
+    (ws as any).isAlive = true;
+    (ws as any).lastHeartbeat = Date.now();
+
     ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message.toString());
@@ -92,7 +125,25 @@ app.prepare().then(() => {
             if (data.user_id) {
               userConnections.set(data.user_id, ws);
               (ws as any).userId = data.user_id;
+
+              // Set online trong DB + broadcast
+              await setUserOnlineStatus(data.user_id, true);
+              broadcastToAll({ type: 'user:online', user_id: data.user_id }, ws);
+
+              // Gửi danh sách online users cho client mới
+              const onlineUserIds = Array.from(userConnections.keys());
+              ws.send(JSON.stringify({
+                type: 'presence:sync',
+                online_users: onlineUserIds,
+              }));
             }
+            break;
+
+          case 'heartbeat':
+            // Client gửi heartbeat để duy trì connection
+            (ws as any).isAlive = true;
+            (ws as any).lastHeartbeat = Date.now();
+            ws.send(JSON.stringify({ type: 'heartbeat:ack' }));
             break;
 
           case 'join':
@@ -136,7 +187,8 @@ app.prepare().then(() => {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
+      // Rời conversation room
       if ((ws as any).currentConversation) {
         const room = conversationRooms.get((ws as any).currentConversation);
         if (room) {
@@ -144,13 +196,30 @@ app.prepare().then(() => {
         }
       }
 
+      // Set offline + broadcast
       if ((ws as any).userId) {
-        userConnections.delete((ws as any).userId);
+        const userId = (ws as any).userId;
+        userConnections.delete(userId);
+        await setUserOnlineStatus(userId, false);
+        broadcastToAll({ type: 'user:offline', user_id: userId });
       }
 
       console.log('Client disconnected from WebSocket');
     });
   });
+
+  // Heartbeat interval: kiểm tra stale connections mỗi 45s
+  setInterval(() => {
+    const now = Date.now();
+    wss.clients.forEach((ws: any) => {
+      // Nếu không nhận heartbeat trong 60s → đóng connection
+      if (now - (ws.lastHeartbeat || 0) > 60000) {
+        console.log('Terminating stale connection:', ws.userId);
+        ws.terminate();
+        return;
+      }
+    });
+  }, 45000);
 
   console.log(`> WebSocket server ready on ws://${hostname}:${wsPort}`);
 });
