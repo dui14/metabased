@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export const NOTIFICATIONS_UPDATED_EVENT = 'metabased:notifications-updated';
 
@@ -11,10 +11,11 @@ export function emitNotificationsUpdated() {
 }
 
 export function useNotificationUnreadCount(options?: { pollingMs?: number; enabled?: boolean }) {
-  const pollingMs = options?.pollingMs ?? 15000;
+  const pollingMs = options?.pollingMs ?? 45000;
   const enabled = options?.enabled ?? true;
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const isFetchingRef = useRef(false);
 
   const refreshUnreadCount = useCallback(async () => {
     if (!enabled) {
@@ -22,6 +23,12 @@ export function useNotificationUnreadCount(options?: { pollingMs?: number; enabl
       setIsLoading(false);
       return;
     }
+
+    if (isFetchingRef.current) {
+      return;
+    }
+
+    isFetchingRef.current = true;
 
     try {
       const response = await fetch('/api/notifications/unread-count', {
@@ -43,6 +50,7 @@ export function useNotificationUnreadCount(options?: { pollingMs?: number; enabl
       setUnreadCount(0);
     } finally {
       setIsLoading(false);
+      isFetchingRef.current = false;
     }
   }, [enabled]);
 

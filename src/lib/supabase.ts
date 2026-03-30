@@ -27,6 +27,20 @@ async function getDbQuery() {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+function createSupabaseServiceClient() {
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return null;
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
+
 // Create Supabase client for client-side (chỉ dùng khi USE_LOCAL_DB=false)
 export const supabase = useLocalDb ? null : createClient(supabaseUrl, supabaseAnonKey);
 
@@ -35,14 +49,12 @@ export const createServerSupabaseClient = () => {
   if (useLocalDb) {
     return null;
   }
-  
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+
+  return createSupabaseServiceClient();
+};
+
+export const createServerSupabaseFallbackClient = () => {
+  return createSupabaseServiceClient();
 };
 
 /**
@@ -490,6 +502,7 @@ export const postService = {
     visibility?: string;
     is_nft?: boolean;
     nft_price?: number | null;
+    nft_mint_expires_at?: string | null;
   }): Promise<any> {
     const {
       user_id,
@@ -498,6 +511,7 @@ export const postService = {
       visibility = 'public',
       is_nft = false,
       nft_price = null,
+      nft_mint_expires_at = null,
     } = postData;
 
     if (useLocalDb) {
@@ -505,11 +519,11 @@ export const postService = {
         const query = await getDbQuery();
         const result = await query(
           `INSERT INTO posts (
-            user_id, image_url, caption, visibility, is_nft, nft_price,
+            user_id, image_url, caption, visibility, is_nft, nft_price, nft_mint_expires_at,
             likes_count, comments_count, reposts_count
-          ) VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 0, 0)
           RETURNING *`,
-          [user_id, image_url, caption, visibility, is_nft, nft_price]
+          [user_id, image_url, caption, visibility, is_nft, nft_price, nft_mint_expires_at]
         );
         
         const post = result.rows[0];
@@ -541,6 +555,7 @@ export const postService = {
         visibility,
         is_nft,
         nft_price: is_nft ? nft_price : null,
+        nft_mint_expires_at,
         likes_count: 0,
         comments_count: 0,
         reposts_count: 0,

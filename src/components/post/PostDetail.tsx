@@ -1,13 +1,16 @@
 'use client';
 
-import { cn, formatDate, formatNumber } from '@/lib/utils';
+import { cn, formatAddress, formatDate, formatNumber } from '@/lib/utils';
 import { Avatar, Badge, Button, Card } from '@/components/common';
 import { Heart, Share, Sparkles, ExternalLink, Check, Repeat2 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers';
+import { buyPostListingOnChain } from '@/lib/nft-mint';
+import { formatTokenIdShort, resolveNftPreview } from '@/lib/nft-preview';
 import type { Post, Comment } from '@/types';
 
 interface PostDetailProps {
@@ -21,6 +24,7 @@ interface PostDetailProps {
 const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }: PostDetailProps) => {
   const router = useRouter();
   const { user } = useAuth();
+  const { primaryWallet } = useDynamicContext();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
   const [isReposted, setIsReposted] = useState(false);
@@ -29,10 +33,52 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
   const [localComments, setLocalComments] = useState<Comment[]>(comments);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isBuying, setIsBuying] = useState(false);
+  const [nftPreviewImage, setNftPreviewImage] = useState<string | null>(null);
+  const [nftTokenUri, setNftTokenUri] = useState<string | null>(null);
+
+  const nftStatus = post.nft_status || 'minted';
+  const nftPrice = post.nft_price?.trim() || null;
+  const nftListingId = post.nft_listing_id || null;
+  const isListed = nftStatus === 'listed' && Boolean(nftListingId && nftPrice);
+  const nftDisplayImage = post.image_url || nftPreviewImage;
+  const nftActionTime = nftStatus === 'listed' ? post.updated_at : post.created_at;
+  const walletConnector = primaryWallet?.connector;
 
   useEffect(() => {
     setLocalComments(comments);
   }, [comments]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadPreview = async () => {
+      if (!post.is_nft) {
+        setNftPreviewImage(null);
+        setNftTokenUri(null);
+        return;
+      }
+
+      const preview = await resolveNftPreview({
+        contractType: post.nft_contract_type || null,
+        contractAddress: post.nft_contract_address || null,
+        tokenId: post.nft_token_id || null,
+      });
+
+      if (!isActive) {
+        return;
+      }
+
+      setNftPreviewImage(preview.imageUrl);
+      setNftTokenUri(preview.tokenUri);
+    };
+
+    void loadPreview();
+
+    return () => {
+      isActive = false;
+    };
+  }, [post.id, post.is_nft, post.nft_contract_type, post.nft_contract_address, post.nft_token_id]);
 
   useEffect(() => {
     const checkLikeStatus = async () => {
@@ -205,6 +251,29 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
     }
   };
 
+  const handleBuyNft = async () => {
+    if (!isListed || !nftListingId || !nftPrice) {
+      alert('Listing is not available');
+      return;
+    }
+
+    setIsBuying(true);
+    try {
+      const result = await buyPostListingOnChain({
+        listingId: nftListingId,
+        quantity: 1,
+        unitPriceEth: nftPrice,
+        walletConnector,
+      });
+      alert(`Buy success. Tx: ${result.txHash}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to buy NFT';
+      alert(message);
+    } finally {
+      setIsBuying(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto">
       {/* Creator Info */}
@@ -229,10 +298,10 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
           <p className="text-dark dark:text-white mt-4 text-base leading-relaxed">{post.caption}</p>
         )}
 
-        {post.image_url && (
+        {nftDisplayImage && (
           <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 mt-4 rounded-xl overflow-hidden">
             <Image
-              src={post.image_url}
+              src={nftDisplayImage}
               alt={post.caption || 'Post image'}
               fill
               className="object-cover"
@@ -329,41 +398,61 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
           <div className="space-y-3 mb-4">
             <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span className="text-gray-500">Token ID</span>
-              <span className="font-mono text-dark dark:text-white">#{post.nft_token_id || '1234'}</span>
+              <span className="font-mono text-dark dark:text-white">{formatTokenIdShort(post.nft_token_id)}</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span className="text-gray-500">Contract</span>
-              <span className="font-mono text-sm text-dark dark:text-white">0x1234...5678</span>
+              <span className="font-mono text-sm text-dark dark:text-white">{post.nft_contract_address ? formatAddress(post.nft_contract_address) : '-'}</span>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-gray-500">Type</span>
+              <span className="text-dark dark:text-white">{post.nft_contract_type || '-'}</span>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-gray-500">Time</span>
+              <span className="text-dark dark:text-white">{new Date(nftActionTime).toLocaleString('vi-VN')}</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span className="text-gray-500">Token URI</span>
-              <Link href="#" className="text-primary-500 hover:underline flex items-center gap-1">
-                View Metadata <ExternalLink size={14} />
-              </Link>
+              {nftTokenUri ? (
+                <a
+                  href={nftTokenUri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-500 hover:underline flex items-center gap-1"
+                >
+                  View Metadata <ExternalLink size={14} />
+                </a>
+              ) : (
+                <span className="text-gray-400">-</span>
+              )}
             </div>
             <div className="flex justify-between items-center py-2">
               <span className="text-gray-500">Status</span>
-              <Badge variant="success" size="sm">Listed for Sale</Badge>
+              <Badge variant={isListed ? 'success' : 'default'} size="sm">{nftStatus}</Badge>
             </div>
           </div>
 
           <div className="flex items-center justify-between p-4 bg-gradient-to-r from-primary-50 to-orange-50 dark:from-primary-900/30 dark:to-orange-900/30 rounded-xl">
             <div>
               <p className="text-sm text-gray-500">Current Price</p>
-              <p className="text-2xl font-bold text-dark dark:text-white">{post.nft_price || '0.05'} ETH</p>
-              <p className="text-xs text-gray-400">≈ $125.00 USD</p>
+              <p className="text-2xl font-bold text-dark dark:text-white">{nftPrice ? `${nftPrice} ETH` : '-'}</p>
+              <p className="text-xs text-gray-400">Listing ID: {nftListingId || '-'}</p>
             </div>
-            <Button variant="primary" size="lg" className="px-8">
-              Buy NFT
-            </Button>
+            {isListed ? (
+              <Button variant="primary" size="lg" className="px-8" onClick={handleBuyNft} disabled={isBuying}>
+                {isBuying ? 'Buying...' : 'Buy NFT'}
+              </Button>
+            ) : (
+              <Badge variant="default" size="sm">Sell in Create &gt; Sell</Badge>
+            )}
           </div>
 
-          {/* Transaction Status */}
           <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
             <p className="text-xs text-gray-500 mb-1">Transaction History</p>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse-soft" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">Minted 2 hours ago</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">{`${nftStatus} at ${new Date(nftActionTime).toLocaleString('vi-VN')}`}</span>
             </div>
           </div>
         </Card>

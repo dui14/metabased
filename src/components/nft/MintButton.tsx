@@ -7,27 +7,27 @@ import { mintPostOnChain, persistMintedPost, type MintContractType } from '@/lib
 
 interface MintButtonProps {
   postId: string;
+  tokenURI?: string | null;
+  mintDeadline?: string | null;
   disabled?: boolean;
-  defaultPrice?: string | null;
   onMintSuccess?: (post: Record<string, unknown>) => void;
 }
 
 type MintStatus = 'idle' | 'preparing' | 'signing' | 'minting' | 'persisting' | 'success' | 'error';
 
-const MintButton = ({ postId, disabled, defaultPrice, onMintSuccess }: MintButtonProps) => {
+const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, onMintSuccess }: MintButtonProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<MintStatus>('idle');
-  const [price, setPrice] = useState(defaultPrice || '0.05');
   const [contractType, setContractType] = useState<MintContractType>('ERC721');
   const [amount1155, setAmount1155] = useState('1');
   const [errorMessage, setErrorMessage] = useState('');
   const [mintedTokenId, setMintedTokenId] = useState('');
-  const [txHash, setTxHash] = useState('');
+  const [mintTxHash, setMintTxHash] = useState('');
 
   const handleMint = async () => {
     setErrorMessage('');
     setMintedTokenId('');
-    setTxHash('');
+    setMintTxHash('');
 
     try {
       setStatus('preparing');
@@ -40,6 +40,8 @@ const MintButton = ({ postId, disabled, defaultPrice, onMintSuccess }: MintButto
         postId,
         contractType,
         amount,
+        tokenURI,
+        mintDeadline,
       });
 
       setStatus('persisting');
@@ -48,12 +50,11 @@ const MintButton = ({ postId, disabled, defaultPrice, onMintSuccess }: MintButto
         contractType,
         contractAddress: onChainResult.contractAddress,
         tokenId: onChainResult.tokenId,
-        txHash: onChainResult.txHash,
-        nftPrice: price,
+        mintTxHash: onChainResult.mintTxHash,
       });
 
       setMintedTokenId(onChainResult.tokenId);
-      setTxHash(onChainResult.txHash);
+      setMintTxHash(onChainResult.mintTxHash);
       setStatus('success');
       onMintSuccess?.(persisted.post);
     } catch (error) {
@@ -181,23 +182,6 @@ const MintButton = ({ postId, disabled, defaultPrice, onMintSuccess }: MintButto
               </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Set Price (ETH)
-              </label>
-              <input
-                type="number"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                step="0.01"
-                min="0"
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
-              />
-              <p className="text-xs text-gray-400 mt-2">
-                Platform fee: 2.5% · You receive: {(parseFloat(price) * 0.975).toFixed(4)} ETH
-              </p>
-            </div>
-
             <div className="p-4 bg-gray-50 rounded-xl space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Network</span>
@@ -235,7 +219,7 @@ const MintButton = ({ postId, disabled, defaultPrice, onMintSuccess }: MintButto
             </p>
             <div className="text-left p-3 bg-gray-50 rounded-xl mb-6 space-y-1">
               <p className="text-sm text-gray-600">Token ID: <span className="font-semibold text-dark">{mintedTokenId}</span></p>
-              <p className="text-sm text-gray-600 break-all">Tx: <span className="font-mono text-xs text-dark">{txHash}</span></p>
+              <p className="text-sm text-gray-600 break-all">Mint Tx: <span className="font-mono text-xs text-dark">{mintTxHash}</span></p>
             </div>
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={() => setIsOpen(false)}>

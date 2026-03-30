@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServerSupabaseClient, createServerSupabaseFallbackClient } from '@/lib/supabase';
 import { CACHE_KEYS, CACHE_TTL, deleteCacheByPrefix, getCache, setCache } from '@/lib/cache';
 import { getClient, isUsingLocalDb, query } from '@/lib/db';
 
@@ -311,14 +311,32 @@ export async function getNotificationUnreadCount(userId: string): Promise<number
   let unreadCount = 0;
 
   if (isUsingLocalDb()) {
-    const result = await query<{ count: number }>(
-      `SELECT COUNT(*)::int AS count
-       FROM notifications
-       WHERE user_id = $1
-         AND is_read = false`,
-      [userId]
-    );
-    unreadCount = result.rows[0]?.count || 0;
+    try {
+      const result = await query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count
+         FROM notifications
+         WHERE user_id = $1
+           AND is_read = false`,
+        [userId]
+      );
+      unreadCount = result.rows[0]?.count || 0;
+    } catch (error) {
+      console.error('Local DB unread count failed, falling back to Supabase:', error);
+
+      const fallbackSupabase = createServerSupabaseFallbackClient();
+      if (!fallbackSupabase) {
+        setCache(cacheKey, 0, { ttl: CACHE_TTL.SHORT });
+        return 0;
+      }
+
+      const { count } = await fallbackSupabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('is_read', false);
+
+      unreadCount = count || 0;
+    }
   } else {
     const supabase = createServerSupabaseClient();
     if (!supabase) {

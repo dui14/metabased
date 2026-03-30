@@ -26,6 +26,9 @@ export interface DbPost {
   reposts_count: number;
   is_nft: boolean;
   nft_token_id: string | null;
+  nft_listing_id: string | null;
+  nft_contract_type: 'ERC721' | 'ERC1155' | null;
+  nft_mint_expires_at: string | null;
   nft_contract_address: string | null;
   nft_price: string | null;
   nft_status: 'minted' | 'listed' | 'sold' | null;

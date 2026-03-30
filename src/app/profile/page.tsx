@@ -1,16 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Avatar, Button, Card, Badge } from '@/components/common';
 import { PostCard } from '@/components/post';
-import { NFTCard } from '@/components/nft';
 import { Settings, Share, MapPin, Link as LinkIcon, Calendar, Sparkles, ImageIcon, Loader2 } from 'lucide-react';
 import { useAuth, useTheme } from '@/providers';
-import type { Post, NFT } from '@/types';
-
-const nfts: NFT[] = [];
+import { formatTokenIdShort, resolveNftPreview } from '@/lib/nft-preview';
+import type { Post } from '@/types';
 
 type TabType = 'posts' | 'nfts';
 
@@ -20,7 +18,9 @@ export default function ProfilePage() {
   const { t } = useTheme();
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [posts, setPosts] = useState<Post[]>([]);
+  const [nftPreviewMap, setNftPreviewMap] = useState<Record<string, string | null>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const nftPosts = useMemo(() => posts.filter((item) => item.is_nft), [posts]);
 
   useEffect(() => {
     const fetchUserPosts = async () => {
@@ -44,6 +44,41 @@ export default function ProfilePage() {
 
     fetchUserPosts();
   }, [user?.id]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadNftPreviews = async () => {
+      const previews = await Promise.all(
+        nftPosts.map(async (item) => {
+          const preview = await resolveNftPreview({
+            contractType: item.nft_contract_type || null,
+            contractAddress: item.nft_contract_address || null,
+            tokenId: item.nft_token_id || null,
+          });
+
+          return [item.id, preview.imageUrl] as const;
+        })
+      );
+
+      if (!isActive) {
+        return;
+      }
+
+      setNftPreviewMap(Object.fromEntries(previews));
+    };
+
+    if (nftPosts.length === 0) {
+      setNftPreviewMap({});
+      return;
+    }
+
+    void loadNftPreviews();
+
+    return () => {
+      isActive = false;
+    };
+  }, [nftPosts]);
 
   const handlePostUpdate = (updatedPost: Post) => {
     setPosts(posts.map(p => p.id === updatedPost.id ? updatedPost : p));
@@ -150,7 +185,7 @@ export default function ProfilePage() {
                 <span className="text-gray-500 ml-1">{t('followers')}</span>
               </div>
               <div>
-                <span className="font-bold text-dark dark:text-white">{nfts.length}</span>
+                <span className="font-bold text-dark dark:text-white">{nftPosts.length}</span>
                 <span className="text-gray-500 ml-1">{t('nftsCreated')}</span>
               </div>
             </div>
@@ -177,7 +212,7 @@ export default function ProfilePage() {
                 : 'text-gray-500 hover:text-dark dark:hover:text-white'
             }`}
           >
-            {t('nfts')} ({nfts.length})
+            {t('nfts')} ({nftPosts.length})
           </button>
         </div>
 
@@ -209,15 +244,35 @@ export default function ProfilePage() {
 
         {activeTab === 'nfts' && (
           <div className="grid grid-cols-2 gap-4">
-            {nfts.length > 0 ? (
-              nfts.map((nft, index) => (
-                <NFTCard
-                  key={nft.id}
-                  nft={nft}
-                  imageUrl={`https://images.unsplash.com/photo-${1618005182384 + index * 1000}?w=400&h=400&fit=crop`}
-                  name={`NFT #${nft.token_id}`}
-                />
-              ))
+            {nftPosts.length > 0 ? (
+              nftPosts.map((item) => {
+                const imageUrl = item.image_url || nftPreviewMap[item.id];
+                const status = item.nft_status || 'minted';
+
+                return (
+                  <Card key={item.id} padding="none" className="overflow-hidden">
+                    <div className="relative aspect-square bg-gray-100 dark:bg-gray-800">
+                      {imageUrl ? (
+                        <img src={imageUrl} alt={item.caption || 'NFT'} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-sm text-gray-400">No image</div>
+                      )}
+                      <div className="absolute top-3 right-3">
+                        <Badge variant="nft" size="sm">
+                          <Sparkles size={10} className="mr-1" />
+                          {item.nft_contract_type || 'NFT'}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="p-3 space-y-1">
+                      <p className="text-sm font-semibold text-dark dark:text-white truncate">Token {formatTokenIdShort(item.nft_token_id)}</p>
+                      <p className="text-xs text-gray-500">Status: {status}</p>
+                      <p className="text-xs text-gray-500">Time: {new Date(item.created_at).toLocaleString('vi-VN')}</p>
+                      {item.nft_price ? <p className="text-sm font-semibold text-dark dark:text-white">{item.nft_price} ETH</p> : null}
+                    </div>
+                  </Card>
+                );
+              })
             ) : (
               <Card className="col-span-2 text-center py-12">
                 <Sparkles size={48} className="mx-auto text-gray-300 mb-4" />

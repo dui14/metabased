@@ -2,13 +2,14 @@
 
 import { cn, formatDate, formatNumber } from '@/lib/utils';
 import { Avatar, Badge, Button, Card } from '@/components/common';
-import { MintButton } from '@/components/nft';
 import { Heart, MessageCircle, Repeat2, Share, MoreHorizontal, Sparkles, Eye, EyeOff, Trash2, Link as LinkIcon } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useRef, useEffect } from 'react';
 import type { Post } from '@/types';
 import { useAuth, useTheme } from '@/providers';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { buyPostListingOnChain } from '@/lib/nft-mint';
 
 interface PostCardProps {
   post: Post;
@@ -23,22 +24,22 @@ interface PostCardProps {
 const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDelete }: PostCardProps) => {
   const { user } = useAuth();
   const { t } = useTheme();
+  const { primaryWallet } = useDynamicContext();
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
   const [isReposted, setIsReposted] = useState(false);
   const [repostsCount, setRepostsCount] = useState(post.reposts_count);
   const [showMenu, setShowMenu] = useState(false);
-  const [mintedOverride, setMintedOverride] = useState<Partial<Post> | null>(null);
+  const [isBuying, setIsBuying] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   
   const isOwner = user?.id === post.user_id;
-  const isNft = mintedOverride?.is_nft ?? post.is_nft;
-  const nftStatus = mintedOverride?.nft_status ?? post.nft_status;
-  const nftPrice = mintedOverride?.nft_price ?? post.nft_price;
-
-  useEffect(() => {
-    setMintedOverride(null);
-  }, [post.id]);
+  const isNft = post.is_nft;
+  const nftPrice = post.nft_price?.trim() || null;
+  const nftListingId = post.nft_listing_id || null;
+  const nftStatus = post.nft_status || 'minted';
+  const isListed = nftStatus === 'listed' && Boolean(nftListingId && nftPrice);
+  const walletConnector = primaryWallet?.connector;
 
   useEffect(() => {
     const checkLikeStatus = async () => {
@@ -241,10 +242,27 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
     setShowMenu(false);
   };
 
-  const handleMintSuccess = (updatedPost: Record<string, unknown>) => {
-    const normalizedPost = updatedPost as Partial<Post>;
-    setMintedOverride(normalizedPost);
-    onUpdate?.({ ...post, ...normalizedPost } as Post);
+  const handleBuyNft = async () => {
+    if (!isListed || !nftListingId || !nftPrice) {
+      alert('Listing is not available');
+      return;
+    }
+
+    setIsBuying(true);
+    try {
+      const result = await buyPostListingOnChain({
+        listingId: nftListingId,
+        quantity: 1,
+        unitPriceEth: nftPrice,
+        walletConnector,
+      });
+      alert(`Buy success. Tx: ${result.txHash}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to buy NFT';
+      alert(message);
+    } finally {
+      setIsBuying(false);
+    }
   };
 
   return (
@@ -353,36 +371,34 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
       </Link>
 
       {/* NFT Section */}
-      {(isNft || isOwner) && (
+      {isNft && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-gradient-to-r from-primary-50 to-orange-50 dark:from-primary-900/30 dark:to-orange-900/30 rounded-xl mb-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center shadow-soft flex-shrink-0">
               <Sparkles size={16} className="text-primary-500" />
             </div>
             <div>
-              <p className="text-xs text-gray-500">{isNft ? 'Price' : 'NFT Status'}</p>
-              <p className="font-semibold text-dark dark:text-white text-sm sm:text-base">
-                {isNft ? `${nftPrice || '0.05'} ETH` : 'Not minted yet'}
-              </p>
+              <p className="text-xs text-gray-500">Status</p>
+              <p className="font-semibold text-dark dark:text-white text-sm sm:text-base capitalize">{nftStatus}</p>
+              {isListed && <p className="text-xs text-gray-500">{nftPrice} ETH</p>}
             </div>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            {isNft && (
-              <Badge variant="default" size="sm" className="text-xs">
-                Base Sepolia
-              </Badge>
-            )}
-            {nftStatus === 'listed' && (
-              <Button size="sm" variant="primary" className="flex-1 sm:flex-none">
-                Buy NFT
+            <Badge variant="default" size="sm" className="text-xs">
+              Base Sepolia
+            </Badge>
+            {isListed ? (
+              <Button
+                size="sm"
+                variant="primary"
+                className="flex-1 sm:flex-none"
+                onClick={handleBuyNft}
+                disabled={isBuying}
+              >
+                {isBuying ? 'Buying...' : 'Buy NFT'}
               </Button>
-            )}
-            {!nftStatus && isOwner && (
-              <MintButton
-                postId={post.id}
-                defaultPrice={nftPrice || null}
-                onMintSuccess={handleMintSuccess}
-              />
+            ) : (
+              <span className="text-xs text-gray-500">Sell in Create &gt; Sell</span>
             )}
           </div>
         </div>

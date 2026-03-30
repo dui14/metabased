@@ -4,7 +4,7 @@ export interface Post {
   user_id: string;
   image_url: string | null;
   caption: string | null;
-  visibility: 'public' | 'private';
+  visibility: 'public' | 'private' | 'followers';
   likes_count: number;
   comments_count: number;
   reposts_count: number;
@@ -13,6 +13,10 @@ export interface Post {
   repost_user_id?: string | null;
   is_nft: boolean;
   nft_token_id?: string;
+  nft_listing_id?: string;
+  nft_contract_address?: string;
+  nft_contract_type?: 'ERC721' | 'ERC1155';
+  nft_mint_expires_at?: string | null;
   nft_price?: string;
   nft_status?: 'minted' | 'listed' | 'sold';
   created_at: string;

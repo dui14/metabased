@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServerSupabaseClient, createServerSupabaseFallbackClient } from '@/lib/supabase';
 import { isUsingLocalDb } from '@/lib/db';
 import { verifyAndGetUser } from '@/lib/jwt';
 
@@ -40,15 +40,22 @@ async function findUserByWalletAddress(walletAddress: string): Promise<Authentic
   const useLocalDb = isUsingLocalDb();
 
   if (useLocalDb) {
-    const { query } = await import('@/lib/db');
-    const result = await query(
-      'SELECT id, role, wallet_address FROM users WHERE wallet_address = $1 LIMIT 1',
-      [walletAddress.toLowerCase()]
-    );
-    return (result.rows[0] as AuthenticatedUser | undefined) || null;
+    try {
+      const { query } = await import('@/lib/db');
+      const result = await query(
+        'SELECT id, role, wallet_address FROM users WHERE wallet_address = $1 LIMIT 1',
+        [walletAddress.toLowerCase()]
+      );
+      return (result.rows[0] as AuthenticatedUser | undefined) || null;
+    } catch (error) {
+      console.error('Local DB auth lookup failed, falling back to Supabase:', error);
+    }
   }
 
-  const supabase = createServerSupabaseClient();
+  const supabase = useLocalDb
+    ? createServerSupabaseFallbackClient()
+    : createServerSupabaseClient();
+
   if (!supabase) {
     return null;
   }

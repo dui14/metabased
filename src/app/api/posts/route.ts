@@ -85,7 +85,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { image_url, caption, visibility = 'public' } = body;
+    const {
+      image_url,
+      caption,
+      visibility = 'public',
+      nft_mint_expires_at = null,
+    } = body;
 
     // Require at least caption or image
     if (!image_url && !caption) {
@@ -102,6 +107,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let normalizedMintExpiresAt: string | null = null;
+    if (nft_mint_expires_at !== null && nft_mint_expires_at !== undefined) {
+      if (typeof nft_mint_expires_at !== 'string') {
+        return NextResponse.json(
+          { error: 'nft_mint_expires_at must be an ISO datetime string' },
+          { status: 400 }
+        );
+      }
+
+      const parsed = Date.parse(nft_mint_expires_at);
+      if (Number.isNaN(parsed)) {
+        return NextResponse.json(
+          { error: 'Invalid nft_mint_expires_at format' },
+          { status: 400 }
+        );
+      }
+
+      if (parsed <= Date.now()) {
+        return NextResponse.json(
+          { error: 'nft_mint_expires_at must be in the future' },
+          { status: 400 }
+        );
+      }
+
+      normalizedMintExpiresAt = new Date(parsed).toISOString();
+    }
+
     const useLocalDb = isUsingLocalDb();
     let post: any;
 
@@ -109,11 +141,11 @@ export async function POST(request: NextRequest) {
       const { query } = await import('@/lib/db');
       const insertResult = await query(
         `INSERT INTO posts (
-          user_id, image_url, caption, visibility, is_nft, nft_price,
+          user_id, image_url, caption, visibility, is_nft, nft_price, nft_mint_expires_at,
           likes_count, comments_count, reposts_count
-        ) VALUES ($1, $2, $3, $4, false, null, 0, 0, 0)
+        ) VALUES ($1, $2, $3, $4, false, null, $5, 0, 0, 0)
         RETURNING *`,
-        [currentUser.id, image_url || null, caption || null, visibility]
+        [currentUser.id, image_url || null, caption || null, visibility, normalizedMintExpiresAt]
       );
 
       if (insertResult.rows.length === 0) {
@@ -153,6 +185,7 @@ export async function POST(request: NextRequest) {
           visibility,
           is_nft: false,
           nft_price: null,
+          nft_mint_expires_at: normalizedMintExpiresAt,
           likes_count: 0,
           comments_count: 0,
           reposts_count: 0,

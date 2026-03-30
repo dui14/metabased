@@ -26,9 +26,8 @@ export async function POST(
       contract_type,
       contract_address,
       token_id,
-      mint_tx_hash = null,
+      listing_id,
       listing_tx_hash = null,
-      listing_id = null,
       nft_price = null,
     } = body;
 
@@ -53,14 +52,12 @@ export async function POST(
       );
     }
 
-    if (listing_id !== null && typeof listing_id !== 'string') {
+    if (!listing_id || typeof listing_id !== 'string') {
       return NextResponse.json(
-        { error: 'listing_id must be a string when provided' },
+        { error: 'listing_id is required' },
         { status: 400 }
       );
     }
-
-    const nextNftStatus = listing_id ? 'listed' : 'minted';
 
     const useLocalDb = isUsingLocalDb();
 
@@ -68,7 +65,7 @@ export async function POST(
       const { query } = await import('@/lib/db');
 
       const ownershipResult = await query(
-        'SELECT user_id, image_url, is_nft, nft_mint_expires_at FROM posts WHERE id = $1 LIMIT 1',
+        'SELECT user_id, is_nft, nft_contract_address, nft_contract_type, nft_token_id FROM posts WHERE id = $1 LIMIT 1',
         [params.postId]
       );
 
@@ -79,54 +76,57 @@ export async function POST(
         );
       }
 
-      const ownerId = ownershipResult.rows[0].user_id as string;
-      if (ownerId !== currentUser.id && currentUser.role !== 'admin') {
+      const currentPost = ownershipResult.rows[0];
+      if (currentPost.user_id !== currentUser.id && currentUser.role !== 'admin') {
         return NextResponse.json(
-          { error: 'Forbidden - You can only mint your own posts' },
+          { error: 'Forbidden - You can only list your own posts' },
           { status: 403 }
         );
       }
 
-      if (ownershipResult.rows[0].is_nft) {
+      if (!currentPost.is_nft) {
         return NextResponse.json(
-          { error: 'Post is already minted as NFT' },
+          { error: 'Post is not minted as NFT yet' },
           { status: 409 }
         );
       }
 
-      const mintExpiresAt = ownershipResult.rows[0].nft_mint_expires_at as string | null;
-      if (mintExpiresAt && Date.parse(mintExpiresAt) <= Date.now()) {
+      const normalizedContractAddress = String(currentPost.nft_contract_address || '').toLowerCase();
+      if (normalizedContractAddress && normalizedContractAddress !== contract_address.toLowerCase()) {
         return NextResponse.json(
-          { error: 'Mint deadline has expired for this post' },
+          { error: 'contract_address does not match minted NFT' },
           { status: 409 }
         );
       }
 
-      if (listing_id && ownershipResult.rows[0].image_url) {
+      if (currentPost.nft_contract_type && currentPost.nft_contract_type !== contract_type) {
         return NextResponse.json(
-          { error: 'Sell mode requires post without image. Remove image and try again.' },
+          { error: 'contract_type does not match minted NFT' },
+          { status: 409 }
+        );
+      }
+
+      if (currentPost.nft_token_id && String(currentPost.nft_token_id) !== token_id) {
+        return NextResponse.json(
+          { error: 'token_id does not match minted NFT' },
           { status: 409 }
         );
       }
 
       const updateResult = await query(
         `UPDATE posts
-         SET is_nft = true,
-             nft_token_id = $1,
-             nft_contract_address = $2,
-             nft_listing_id = $3,
-             nft_contract_type = $4,
-             nft_price = $5,
-             nft_status = $6,
+         SET nft_listing_id = $1,
+             nft_price = $2,
+             nft_status = 'listed',
              updated_at = NOW()
-         WHERE id = $7
+         WHERE id = $3
          RETURNING *`,
-        [token_id, contract_address, listing_id, contract_type, nft_price, nextNftStatus, params.postId]
+        [listing_id, nft_price, params.postId]
       );
 
       if (updateResult.rows.length === 0) {
         return NextResponse.json(
-          { error: 'Failed to update post NFT data' },
+          { error: 'Failed to update post listing data' },
           { status: 500 }
         );
       }
@@ -149,7 +149,6 @@ export async function POST(
 
       return NextResponse.json({
         post,
-        mint_tx_hash,
         listing_tx_hash,
         listing_id,
         contract_type,
@@ -166,7 +165,7 @@ export async function POST(
 
     const { data: existingPost, error: existingPostError } = await supabase
       .from('posts')
-      .select('id, user_id, image_url, is_nft, nft_mint_expires_at')
+      .select('id, user_id, is_nft, nft_contract_address, nft_contract_type, nft_token_id')
       .eq('id', params.postId)
       .single();
 
@@ -179,28 +178,38 @@ export async function POST(
 
     if (existingPost.user_id !== currentUser.id && currentUser.role !== 'admin') {
       return NextResponse.json(
-        { error: 'Forbidden - You can only mint your own posts' },
+        { error: 'Forbidden - You can only list your own posts' },
         { status: 403 }
       );
     }
 
-    if (existingPost.is_nft) {
+    if (!existingPost.is_nft) {
       return NextResponse.json(
-        { error: 'Post is already minted as NFT' },
+        { error: 'Post is not minted as NFT yet' },
         { status: 409 }
       );
     }
 
-    if (existingPost.nft_mint_expires_at && Date.parse(existingPost.nft_mint_expires_at) <= Date.now()) {
+    if (
+      existingPost.nft_contract_address &&
+      existingPost.nft_contract_address.toLowerCase() !== contract_address.toLowerCase()
+    ) {
       return NextResponse.json(
-        { error: 'Mint deadline has expired for this post' },
+        { error: 'contract_address does not match minted NFT' },
         { status: 409 }
       );
     }
 
-    if (listing_id && existingPost.image_url) {
+    if (existingPost.nft_contract_type && existingPost.nft_contract_type !== contract_type) {
       return NextResponse.json(
-        { error: 'Sell mode requires post without image. Remove image and try again.' },
+        { error: 'contract_type does not match minted NFT' },
+        { status: 409 }
+      );
+    }
+
+    if (existingPost.nft_token_id && String(existingPost.nft_token_id) !== token_id) {
+      return NextResponse.json(
+        { error: 'token_id does not match minted NFT' },
         { status: 409 }
       );
     }
@@ -208,13 +217,9 @@ export async function POST(
     const { data: updatedPost, error: updateError } = await supabase
       .from('posts')
       .update({
-        is_nft: true,
-        nft_token_id: token_id,
-        nft_contract_address: contract_address,
         nft_listing_id: listing_id,
-        nft_contract_type: contract_type,
         nft_price,
-        nft_status: nextNftStatus,
+        nft_status: 'listed',
       })
       .eq('id', params.postId)
       .select(
@@ -232,9 +237,9 @@ export async function POST(
       .single();
 
     if (updateError || !updatedPost) {
-      console.error('Error updating post mint data:', updateError);
+      console.error('Error updating post listing data:', updateError);
       return NextResponse.json(
-        { error: 'Failed to update post NFT data' },
+        { error: 'Failed to update post listing data' },
         { status: 500 }
       );
     }
@@ -245,13 +250,12 @@ export async function POST(
 
     return NextResponse.json({
       post: updatedPost,
-      mint_tx_hash,
       listing_tx_hash,
       listing_id,
       contract_type,
     });
   } catch (error) {
-    console.error('Error in POST /api/posts/[postId]/mint:', error);
+    console.error('Error in POST /api/posts/[postId]/listing:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

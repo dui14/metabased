@@ -3,7 +3,7 @@
 import { MainLayout } from '@/components/layout';
 import { PostCard } from '@/components/post';
 import { Button, Avatar } from '@/components/common';
-import { Image as ImageIcon, Sparkles, Loader2 } from 'lucide-react';
+import { Image as ImageIcon, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers';
@@ -74,10 +74,6 @@ export default function HomePage() {
                 <Link href="/create" className="flex items-center gap-2 px-4 py-2 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors">
                   <ImageIcon size={18} className="text-primary-500" />
                   <span className="text-sm font-medium">Photo</span>
-                </Link>
-                <Link href="/create" className="flex items-center gap-2 px-4 py-2 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors">
-                  <Sparkles size={18} className="text-primary-500" />
-                  <span className="text-sm font-medium">NFT</span>
                 </Link>
               </div>
               <Link href="/create">
