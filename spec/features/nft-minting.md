@@ -40,8 +40,7 @@ Muc tieu contract:
 
 ## Edge Cases
 - Tx fail/revert
-- Mint het han (`mintEndTime`)
-- Caller khong whitelisted
+- Mint het han theo post (`nft_mint_expires_at` + `mintDeadline`)
 - Duplicate sync tu cung tx hash
 
 ## Security Considerations
