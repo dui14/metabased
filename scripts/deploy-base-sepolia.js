@@ -87,19 +87,18 @@ async function main() {
     throw new Error(`Wrong chainId ${network.chainId}. Expected 84532 (Base Sepolia)`);
   }
 
-  const mintEndTime = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365 * 10;
   const feeOverrides = await getFeeOverrides(provider);
   let nextNonce = await provider.getTransactionCount(deployer.address, "pending");
 
   const nft721 = await deployContract(
     "NFT721",
-    ["Metabased NFT721", "MB721", mintEndTime],
+    ["Metabased NFT721", "MB721"],
     { ...feeOverrides, nonce: nextNonce++ }
   );
 
   const nft1155 = await deployContract(
     "NFT1155",
-    ["https://api.metabased.xyz/metadata/{id}.json", mintEndTime],
+    ["https://api.metabased.xyz/metadata/{id}.json"],
     { ...feeOverrides, nonce: nextNonce++ }
   );
 
