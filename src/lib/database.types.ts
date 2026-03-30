@@ -12,6 +12,8 @@ export interface DbUser {
   following_count: number;
   is_profile_complete: boolean;
   email: string | null;
+  is_online: boolean;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -114,10 +116,47 @@ export interface DbMessage {
   id: string;
   conversation_id: string;
   sender_id: string;
-  receiver_id: string;
+  receiver_id: string | null; // nullable cho group messages
   content: string;
   message_type: 'text' | 'image' | 'nft_share';
   attachment_url: string | null;
   is_read: boolean;
   created_at: string;
 }
+
+export interface DbChatGroup {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbChatGroupMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  role: 'admin' | 'member';
+  joined_at: string;
+}
+
+export interface DbConversation {
+  id: string;
+  participant_1_id: string;
+  participant_2_id: string;
+  type: 'direct' | 'group';
+  group_id: string | null;
+  last_message_id: string | null;
+  last_message_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbMessageReadStatus {
+  id: string;
+  message_id: string;
+  user_id: string;
+  read_at: string;
+}
+

@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers';
 import { Avatar } from '@/components/common';
 import { useNotificationUnreadCount } from '@/lib/useNotificationUnreadCount';
+import { useMessageUnreadCount } from '@/lib/useMessageUnreadCount';
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -19,6 +20,7 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
   const pathname = usePathname();
   const { user } = useAuth();
   const { unreadCount } = useNotificationUnreadCount({ enabled: Boolean(user) });
+  const { unreadCount: messageUnreadCount } = useMessageUnreadCount({ enabled: Boolean(user) });
 
   const navItems = [
     { icon: Home, label: 'Home', href: '/home' },
@@ -110,14 +112,20 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
                 >
                   <span className="relative inline-flex">
                     <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+                    {/* Collapsed badge: notifications */}
                     {item.href === '/notifications' && unreadCount > 0 && collapsed && (
                       <span
-                        className={cn(
-                          'absolute flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white',
-                          collapsed ? '-right-2 -top-2' : '-right-3 -top-2'
-                        )}
+                        className="absolute flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white -right-2 -top-2"
                       >
                         {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
+                    {/* Collapsed badge: messages */}
+                    {item.href === '/messages' && messageUnreadCount > 0 && collapsed && (
+                      <span
+                        className="absolute flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-primary-500 px-1 text-[10px] font-semibold leading-none text-white -right-2 -top-2"
+                      >
+                        {messageUnreadCount > 99 ? '99+' : messageUnreadCount}
                       </span>
                     )}
                   </span>
@@ -129,9 +137,16 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
                   >
                     {item.label}
                   </span>
+                  {/* Expanded badge: notifications */}
                   {item.href === '/notifications' && unreadCount > 0 && !collapsed && (
                     <span className="ml-auto inline-flex min-w-[22px] h-[22px] items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white">
                       {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                  {/* Expanded badge: messages */}
+                  {item.href === '/messages' && messageUnreadCount > 0 && !collapsed && (
+                    <span className="ml-auto inline-flex min-w-[22px] h-[22px] items-center justify-center rounded-full bg-primary-500 px-1.5 text-xs font-semibold text-white">
+                      {messageUnreadCount > 99 ? '99+' : messageUnreadCount}
                     </span>
                   )}
                   {collapsed && (

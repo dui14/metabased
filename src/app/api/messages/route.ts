@@ -88,8 +88,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { conversation_id, sender_id, receiver_id, content, message_type = 'text' } = body;
+    const isGroupMessage = !receiver_id; // group messages have no specific receiver
 
-    if (!conversation_id || !sender_id || !receiver_id || !content) {
+    if (!conversation_id || !sender_id || !content) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -98,37 +99,39 @@ export async function POST(request: NextRequest) {
 
     if (useLocalDb) {
       const query = await getLocalDbQuery();
-      
-      const receiverResult = await query(`
-        SELECT message_permission FROM users WHERE id = $1
-      `, [receiver_id]);
-      
-      if (receiverResult.rows.length === 0) {
-        return NextResponse.json(
-          { error: 'Receiver not found' },
-          { status: 404 }
-        );
-      }
-      
-      const messagePermission = receiverResult.rows[0].message_permission || 'everyone';
-      
-      if (messagePermission === 'following') {
-        const followResult = await query(`
-          SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2
-        `, [receiver_id, sender_id]);
-        
-        if (followResult.rows.length === 0) {
+
+      // Chi check message_permission cho DM (không check cho group messages)
+      if (!isGroupMessage) {
+        const receiverResult = await query(`
+          SELECT message_permission FROM users WHERE id = $1
+        `, [receiver_id]);
+
+        if (receiverResult.rows.length === 0) {
           return NextResponse.json(
-            { error: 'You can only send messages to users you follow' },
-            { status: 403 }
+            { error: 'Receiver not found' },
+            { status: 404 }
           );
         }
+
+        const messagePermission = receiverResult.rows[0].message_permission || 'everyone';
+
+        if (messagePermission === 'following') {
+          const followResult = await query(`
+            SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2
+          `, [receiver_id, sender_id]);
+
+          if (followResult.rows.length === 0) {
+            return NextResponse.json(
+              { error: 'You can only send messages to users you follow' },
+              { status: 403 }
+            );
+          }
+        }
       }
-      
+
       const { getClient } = await import('@/lib/db');
-      
       const client = await getClient();
-      
+
       try {
         await client.query('BEGIN');
 
@@ -136,7 +139,7 @@ export async function POST(request: NextRequest) {
           INSERT INTO messages (conversation_id, sender_id, receiver_id, content, message_type)
           VALUES ($1, $2, $3, $4, $5)
           RETURNING *
-        `, [conversation_id, sender_id, receiver_id, content, message_type]);
+        `, [conversation_id, sender_id, receiver_id ?? null, content, message_type]);
 
         const message = messageResult.rows[0];
 
@@ -150,24 +153,49 @@ export async function POST(request: NextRequest) {
 
         await client.query('COMMIT');
 
+        // Notifications: DM → gửi cho receiver; Group → gửi cho tất cả members trừ sender
         try {
-          await createNotification({
-            userId: receiver_id,
-            actorId: sender_id,
-            type: 'message',
-            title: 'New message',
-            message: 'sent you a message',
-            referenceType: 'conversation',
-            referenceId: conversation_id,
-          });
+          if (!isGroupMessage) {
+            await createNotification({
+              userId: receiver_id,
+              actorId: sender_id,
+              type: 'message',
+              title: 'New message',
+              message: 'sent you a message',
+              referenceType: 'conversation',
+              referenceId: conversation_id,
+            });
+          } else {
+            // Lấy conversation để tìm group_id
+            const convResult = await query(
+              `SELECT group_id FROM conversations WHERE id = $1`,
+              [conversation_id]
+            );
+            const groupId = convResult.rows[0]?.group_id;
+            if (groupId) {
+              const membersResult = await query(
+                `SELECT user_id FROM chat_group_members WHERE group_id = $1 AND user_id != $2`,
+                [groupId, sender_id]
+              );
+              for (const member of membersResult.rows) {
+                await createNotification({
+                  userId: member.user_id,
+                  actorId: sender_id,
+                  type: 'message',
+                  title: 'New group message',
+                  message: 'sent a message in a group',
+                  referenceType: 'conversation',
+                  referenceId: conversation_id,
+                }).catch(() => {});
+              }
+            }
+          }
         } catch (notificationError) {
-          console.error('Error creating message notification:', notificationError);
+          console.error('Error creating notification:', notificationError);
         }
 
         const senderResult = await query(`
-          SELECT id, username, display_name, avatar_url
-          FROM users
-          WHERE id = $1
+          SELECT id, username, display_name, avatar_url FROM users WHERE id = $1
         `, [sender_id]);
 
         return NextResponse.json({
@@ -192,34 +220,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: receiver } = await supabase
-      .from('users')
-      .select('message_permission')
-      .eq('id', receiver_id)
-      .single();
-
-    if (!receiver) {
-      return NextResponse.json(
-        { error: 'Receiver not found' },
-        { status: 404 }
-      );
-    }
-
-    const messagePermission = receiver.message_permission || 'everyone';
-
-    if (messagePermission === 'following') {
-      const { data: followData } = await supabase
-        .from('follows')
-        .select('id')
-        .eq('follower_id', receiver_id)
-        .eq('following_id', sender_id)
+    if (!isGroupMessage) {
+      const { data: receiver } = await supabase
+        .from('users')
+        .select('message_permission')
+        .eq('id', receiver_id)
         .single();
 
-      if (!followData) {
+      if (!receiver) {
         return NextResponse.json(
-          { error: 'This user only accepts messages from people they follow' },
-          { status: 403 }
+          { error: 'Receiver not found' },
+          { status: 404 }
         );
+      }
+
+      const messagePermission = receiver.message_permission || 'everyone';
+
+      if (messagePermission === 'following') {
+        const { data: followData } = await supabase
+          .from('follows')
+          .select('id')
+          .eq('follower_id', receiver_id)
+          .eq('following_id', sender_id)
+          .single();
+
+        if (!followData) {
+          return NextResponse.json(
+            { error: 'This user only accepts messages from people they follow' },
+            { status: 403 }
+          );
+        }
       }
     }
 
@@ -292,14 +322,39 @@ export async function PATCH(request: NextRequest) {
 
     if (useLocalDb) {
       const query = await getLocalDbQuery();
-      
-      await query(`
-        UPDATE messages
-        SET is_read = true
-        WHERE conversation_id = $1 
-          AND receiver_id = $2 
-          AND is_read = false
-      `, [conversation_id, user_id]);
+
+      // Kiểm tra conversation type
+      const convResult = await query(
+        `SELECT type FROM conversations WHERE id = $1`,
+        [conversation_id]
+      );
+      const convType = convResult.rows[0]?.type || 'direct';
+
+      if (convType === 'group') {
+        // Group: insert read receipt vào message_read_status cho tất cả tin nhắn chưa đọc
+        // (tin nhắn trong group conversation này, không phải do user gửi)
+        await query(`
+          INSERT INTO message_read_status (message_id, user_id)
+          SELECT m.id, $1
+          FROM messages m
+          WHERE m.conversation_id = $2
+            AND m.sender_id != $1
+            AND NOT EXISTS (
+              SELECT 1 FROM message_read_status mrs
+              WHERE mrs.message_id = m.id AND mrs.user_id = $1
+            )
+          ON CONFLICT (message_id, user_id) DO NOTHING
+        `, [user_id, conversation_id]);
+      } else {
+        // DM: update is_read trên message trực tiếp
+        await query(`
+          UPDATE messages
+          SET is_read = true
+          WHERE conversation_id = $1
+            AND receiver_id = $2
+            AND is_read = false
+        `, [conversation_id, user_id]);
+      }
 
       return NextResponse.json({ success: true });
     }
@@ -312,22 +367,52 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const { error } = await supabase
-      .from('messages')
-      .update({ is_read: true })
-      .eq('conversation_id', conversation_id)
-      .eq('receiver_id', user_id)
-      .eq('is_read', false);
+    // Check conversation type
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('type')
+      .eq('id', conversation_id)
+      .single();
 
-    if (error) {
-      console.error('Error marking messages as read:', error);
-      return NextResponse.json(
-        { error: 'Failed to mark messages as read' },
-        { status: 500 }
-      );
+    const convType = conv?.type || 'direct';
+
+    if (convType === 'group') {
+      // Lấy tất cả messages chưa đọc trong group (không phải do user gửi)
+      const { data: unreadMessages } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversation_id)
+        .neq('sender_id', user_id);
+
+      if (unreadMessages && unreadMessages.length > 0) {
+        // Upsert read receipts
+        const readReceipts = unreadMessages.map((m: any) => ({
+          message_id: m.id,
+          user_id,
+        }));
+        await supabase
+          .from('message_read_status')
+          .upsert(readReceipts, { onConflict: 'message_id,user_id' });
+      }
+    } else {
+      const { error } = await supabase
+        .from('messages')
+        .update({ is_read: true })
+        .eq('conversation_id', conversation_id)
+        .eq('receiver_id', user_id)
+        .eq('is_read', false);
+
+      if (error) {
+        console.error('Error marking messages as read:', error);
+        return NextResponse.json(
+          { error: 'Failed to mark messages as read' },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({ success: true });
+
   } catch (error) {
     console.error('Error in PATCH /api/messages:', error);
     return NextResponse.json(
