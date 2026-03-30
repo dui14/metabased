@@ -69,15 +69,17 @@
 
 ### POST /api/posts
 - Auth: Bearer token hoac cookie `dynamic_authentication_token`
-- Input: `{ image_url?, caption?, visibility? }`
+- Input: `{ image_url?, caption?, visibility?, nft_mint_expires_at? }`
 - Rule: bat buoc co `image_url` hoac `caption`
+- Rule: `nft_mint_expires_at` neu co thi phai la ISO datetime va lon hon thoi diem hien tai
 - Output: `{ post }` (201)
 
 ### POST /api/posts/[postId]/mint
 - Auth: Bearer token hoac cookie token
-- Input: `{ contract_type: 'ERC721'|'ERC1155', contract_address, token_id, tx_hash?, nft_price? }`
+- Input: `{ contract_type: 'ERC721'|'ERC1155', contract_address, token_id, mint_tx_hash?, listing_tx_hash?, listing_id?, nft_price? }`
 - Rule: chi owner hoac admin duoc cap nhat mint metadata
-- Output: `{ post, tx_hash, contract_type }`
+- Rule: neu post da het han mint (`nft_mint_expires_at`) thi tra 409
+- Output: `{ post, mint_tx_hash, listing_tx_hash, listing_id, contract_type }`
 - Errors: 400, 401, 403, 404, 409, 500
 
 ### GET /api/posts/[postId]
