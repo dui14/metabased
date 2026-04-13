@@ -1,5 +1,3 @@
--- METABASED 
-
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS users (
@@ -16,6 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_profile_complete BOOLEAN DEFAULT false,
     email VARCHAR(255),
     message_permission VARCHAR(20) DEFAULT 'everyone' CHECK (message_permission IN ('everyone', 'following')),
+    is_online BOOLEAN DEFAULT false,
+    last_seen_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+CREATE INDEX IF NOT EXISTS idx_users_online ON users(is_online) WHERE is_online = true;
 
 CREATE TABLE IF NOT EXISTS posts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -146,29 +147,62 @@ CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, is_read) WHERE is_read = false;
 CREATE INDEX IF NOT EXISTS idx_notif_created ON notifications(created_at DESC);
 
+CREATE TABLE IF NOT EXISTS chat_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL,
+    avatar_url TEXT,
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_groups_created_by ON chat_groups(created_by);
+
+CREATE TABLE IF NOT EXISTS chat_group_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    group_id UUID NOT NULL REFERENCES chat_groups(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(20) DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(group_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_members_group ON chat_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON chat_group_members(user_id);
+
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    type VARCHAR(20) DEFAULT 'direct' CHECK (type IN ('direct', 'group')),
     participant_1_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    participant_2_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    participant_2_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    group_id UUID REFERENCES chat_groups(id) ON DELETE CASCADE,
     last_message_id UUID,
     last_message_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT conversations_unique_pair UNIQUE(participant_1_id, participant_2_id),
-    CONSTRAINT conversations_different_users CHECK (participant_1_id != participant_2_id),
-    CONSTRAINT conversations_ordered_ids CHECK (participant_1_id < participant_2_id)
+    CONSTRAINT conversations_direct_different_users CHECK (type = 'group' OR participant_1_id != participant_2_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_conv_participant1 ON conversations(participant_1_id);
 CREATE INDEX IF NOT EXISTS idx_conv_participant2 ON conversations(participant_2_id);
 CREATE INDEX IF NOT EXISTS idx_conv_last_message ON conversations(last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_both_participants ON conversations(participant_1_id, participant_2_id);
+CREATE INDEX IF NOT EXISTS idx_conv_type ON conversations(type);
+CREATE INDEX IF NOT EXISTS idx_conv_group ON conversations(group_id) WHERE group_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_direct_unique_pair
+    ON conversations(participant_1_id, participant_2_id)
+    WHERE COALESCE(type, 'direct') = 'direct' AND participant_2_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_group_unique
+    ON conversations(group_id)
+    WHERE type = 'group' AND group_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id UUID REFERENCES users(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'nft_share')),
     attachment_url TEXT,
@@ -182,6 +216,17 @@ CREATE INDEX IF NOT EXISTS idx_msg_receiver ON messages(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages(receiver_id, is_read) WHERE is_read = false;
 CREATE INDEX IF NOT EXISTS idx_msg_conv_created ON messages(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_msg_conv_unread ON messages(conversation_id, is_read) WHERE is_read = false;
+
+CREATE TABLE IF NOT EXISTS message_read_status (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    read_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_msg_read_message ON message_read_status(message_id);
+CREATE INDEX IF NOT EXISTS idx_msg_read_user ON message_read_status(user_id);
 
 CREATE TABLE IF NOT EXISTS follows (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -225,28 +270,25 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER update_users_updated_at
-BEFORE UPDATE ON users
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_posts_updated_at
-BEFORE UPDATE ON posts
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    BEFORE UPDATE ON posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_comments_updated_at
-BEFORE UPDATE ON comments
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    BEFORE UPDATE ON comments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_nfts_updated_at
-BEFORE UPDATE ON nfts
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    BEFORE UPDATE ON nfts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_listings_updated_at
-BEFORE UPDATE ON nft_listings
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    BEFORE UPDATE ON nft_listings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_conversations_updated_at
-BEFORE UPDATE ON conversations
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    BEFORE UPDATE ON conversations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chat_groups_updated_at
+    BEFORE UPDATE ON chat_groups FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE OR REPLACE FUNCTION update_follow_counts()
 RETURNS TRIGGER AS $$
@@ -263,8 +305,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_update_follow_counts
-AFTER INSERT OR DELETE ON follows
-FOR EACH ROW EXECUTE FUNCTION update_follow_counts();
+    AFTER INSERT OR DELETE ON follows FOR EACH ROW EXECUTE FUNCTION update_follow_counts();
 
 CREATE OR REPLACE FUNCTION update_likes_count()
 RETURNS TRIGGER AS $$
@@ -279,8 +320,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_update_likes_count
-AFTER INSERT OR DELETE ON likes
-FOR EACH ROW EXECUTE FUNCTION update_likes_count();
+    AFTER INSERT OR DELETE ON likes FOR EACH ROW EXECUTE FUNCTION update_likes_count();
 
 CREATE OR REPLACE FUNCTION update_comments_count()
 RETURNS TRIGGER AS $$
@@ -295,10 +335,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_update_comments_count
-AFTER INSERT OR DELETE ON comments
-FOR EACH ROW EXECUTE FUNCTION update_comments_count();
+    AFTER INSERT OR DELETE ON comments FOR EACH ROW EXECUTE FUNCTION update_comments_count();
 
--- RPC Functions for manual count updates
 CREATE OR REPLACE FUNCTION increment_likes_count(post_id_param UUID)
 RETURNS void AS $$
 BEGIN
@@ -313,9 +351,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION get_total_unread_message_count(target_user_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+    dm_unread INTEGER;
+    group_unread INTEGER;
+BEGIN
+    SELECT COUNT(*)::int INTO dm_unread
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    WHERE c.type = 'direct'
+      AND m.receiver_id = target_user_id
+      AND m.is_read = false;
 
--- SAMPLE DATA
+    SELECT COUNT(*)::int INTO group_unread
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    JOIN chat_group_members gm ON gm.group_id = c.group_id
+    WHERE c.type = 'group'
+      AND gm.user_id = target_user_id
+      AND m.sender_id != target_user_id
+      AND NOT EXISTS (
+          SELECT 1 FROM message_read_status mrs
+          WHERE mrs.message_id = m.id AND mrs.user_id = target_user_id
+      );
 
--- INSERT INTO users (wallet_address, username, display_name, role, is_profile_complete, bio, avatar_url) VALUES
---     ('0x1234567890abcdef1234567890abcdef12345678', 'admin', 'Admin User', 'admin', true, 'System administrator', 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin'),
---     ('0xabcdef1234567890abcdef1234567890abcdef12', 'demo_user', 'Demo User', 'user', true, 'Just exploring!', 'https://api.dicebear.com/7.x/avataaars/svg?seed=demo');
+    RETURN COALESCE(dm_unread, 0) + COALESCE(group_unread, 0);
+END;
+$$ LANGUAGE plpgsql;

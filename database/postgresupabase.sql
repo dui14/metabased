@@ -1,9 +1,5 @@
--- METABASED - PostgreSQL Schema for Supabase
-
--- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. USERS TABLE
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     wallet_address VARCHAR(42) UNIQUE NOT NULL,
@@ -18,21 +14,22 @@ CREATE TABLE IF NOT EXISTS users (
     is_profile_complete BOOLEAN DEFAULT false,
     email VARCHAR(255),
     message_permission VARCHAR(20) DEFAULT 'everyone' CHECK (message_permission IN ('everyone', 'following')),
+    is_online BOOLEAN DEFAULT false,
+    last_seen_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index cho tìm kiếm nhanh
 CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+CREATE INDEX IF NOT EXISTS idx_users_online ON users(is_online) WHERE is_online = true;
 
--- 2. POSTS TABLE
 CREATE TABLE IF NOT EXISTS posts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    image_url TEXT DEFAULT NULL,  -- Cho phép NULL (text-only posts)
-    caption TEXT DEFAULT NULL,     -- Cho phép NULL (image-only posts)
+    image_url TEXT DEFAULT NULL,
+    caption TEXT DEFAULT NULL,
     likes_count INTEGER DEFAULT 0,
     comments_count INTEGER DEFAULT 0,
     reposts_count INTEGER DEFAULT 0,
@@ -50,12 +47,10 @@ CREATE TABLE IF NOT EXISTS posts (
     CONSTRAINT posts_content_check CHECK (image_url IS NOT NULL OR caption IS NOT NULL)
 );
 
--- Index cho feed và tìm kiếm
 CREATE INDEX IF NOT EXISTS idx_posts_user ON posts(user_id);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_nft ON posts(is_nft) WHERE is_nft = true;
 
--- 3. COMMENTS TABLE
 CREATE TABLE IF NOT EXISTS comments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -67,13 +62,10 @@ CREATE TABLE IF NOT EXISTS comments (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index cho comments
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_user ON comments(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
 
--- 4. NFTS TABLE
--- Metadata NFT đã mint
 CREATE TABLE IF NOT EXISTS nfts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     post_id UUID REFERENCES posts(id) ON DELETE SET NULL,
@@ -93,12 +85,10 @@ CREATE TABLE IF NOT EXISTS nfts (
     UNIQUE(contract_address, token_id)
 );
 
--- Index cho NFTs
 CREATE INDEX IF NOT EXISTS idx_nfts_creator ON nfts(creator_id);
 CREATE INDEX IF NOT EXISTS idx_nfts_owner ON nfts(owner_id);
 CREATE INDEX IF NOT EXISTS idx_nfts_token ON nfts(contract_address, token_id);
 
--- 5. NFT_LISTINGS TABLE
 CREATE TABLE IF NOT EXISTS nft_listings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nft_id UUID NOT NULL REFERENCES nfts(id) ON DELETE CASCADE,
@@ -114,12 +104,10 @@ CREATE TABLE IF NOT EXISTS nft_listings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index cho listings
 CREATE INDEX IF NOT EXISTS idx_listings_nft ON nft_listings(nft_id);
 CREATE INDEX IF NOT EXISTS idx_listings_seller ON nft_listings(seller_id);
 CREATE INDEX IF NOT EXISTS idx_listings_status ON nft_listings(status);
 
--- 6. TRANSACTIONS TABLE
 CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nft_id UUID REFERENCES nfts(id) ON DELETE SET NULL,
@@ -136,14 +124,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index cho transactions
 CREATE INDEX IF NOT EXISTS idx_tx_nft ON transactions(nft_id);
 CREATE INDEX IF NOT EXISTS idx_tx_seller ON transactions(seller_id);
 CREATE INDEX IF NOT EXISTS idx_tx_buyer ON transactions(buyer_id);
 CREATE INDEX IF NOT EXISTS idx_tx_hash ON transactions(tx_hash);
 CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at DESC);
 
--- 7. NOTIFICATIONS TABLE
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -157,37 +143,66 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index cho notifications
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, is_read) WHERE is_read = false;
 CREATE INDEX IF NOT EXISTS idx_notif_created ON notifications(created_at DESC);
 
--- 8. CONVERSATIONS TABLE
+CREATE TABLE IF NOT EXISTS chat_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL,
+    avatar_url TEXT,
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_groups_created_by ON chat_groups(created_by);
+
+CREATE TABLE IF NOT EXISTS chat_group_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    group_id UUID NOT NULL REFERENCES chat_groups(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(20) DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(group_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_members_group ON chat_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON chat_group_members(user_id);
+
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    type VARCHAR(20) DEFAULT 'direct' CHECK (type IN ('direct', 'group')),
     participant_1_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    participant_2_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    participant_2_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    group_id UUID REFERENCES chat_groups(id) ON DELETE CASCADE,
     last_message_id UUID,
     last_message_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT conversations_unique_pair UNIQUE(participant_1_id, participant_2_id),
-    CONSTRAINT conversations_different_users CHECK (participant_1_id != participant_2_id),
-    CONSTRAINT conversations_ordered_ids CHECK (participant_1_id < participant_2_id)
+    CONSTRAINT conversations_direct_different_users CHECK (type = 'group' OR participant_1_id != participant_2_id)
 );
 
--- Index cho conversations
 CREATE INDEX IF NOT EXISTS idx_conv_participant1 ON conversations(participant_1_id);
 CREATE INDEX IF NOT EXISTS idx_conv_participant2 ON conversations(participant_2_id);
 CREATE INDEX IF NOT EXISTS idx_conv_last_message ON conversations(last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_both_participants ON conversations(participant_1_id, participant_2_id);
+CREATE INDEX IF NOT EXISTS idx_conv_type ON conversations(type);
+CREATE INDEX IF NOT EXISTS idx_conv_group ON conversations(group_id) WHERE group_id IS NOT NULL;
 
--- 9. MESSAGES TABLE
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_direct_unique_pair
+    ON conversations(participant_1_id, participant_2_id)
+    WHERE COALESCE(type, 'direct') = 'direct' AND participant_2_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_group_unique
+    ON conversations(group_id)
+    WHERE type = 'group' AND group_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id UUID REFERENCES users(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'nft_share')),
     attachment_url TEXT,
@@ -195,7 +210,6 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index cho messages
 CREATE INDEX IF NOT EXISTS idx_msg_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_msg_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_msg_receiver ON messages(receiver_id);
@@ -203,7 +217,17 @@ CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages(receiver_id, is_read) WHER
 CREATE INDEX IF NOT EXISTS idx_msg_conv_created ON messages(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_msg_conv_unread ON messages(conversation_id, is_read) WHERE is_read = false;
 
--- 10. FOLLOWS TABLE - Quan hệ follow giữa users
+CREATE TABLE IF NOT EXISTS message_read_status (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    read_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_msg_read_message ON message_read_status(message_id);
+CREATE INDEX IF NOT EXISTS idx_msg_read_user ON message_read_status(user_id);
+
 CREATE TABLE IF NOT EXISTS follows (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -215,7 +239,6 @@ CREATE TABLE IF NOT EXISTS follows (
 CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
 CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id);
 
--- 11. LIKES TABLE
 CREATE TABLE IF NOT EXISTS likes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -238,35 +261,35 @@ CREATE TABLE IF NOT EXISTS reposts (
 CREATE INDEX IF NOT EXISTS idx_reposts_post ON reposts(post_id);
 CREATE INDEX IF NOT EXISTS idx_reposts_user ON reposts(user_id);
 
--- FUNCTIONS & TRIGGERS
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
--- Triggers cho updated_at
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_users_updated_at
+    BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_posts_updated_at BEFORE UPDATE ON posts
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_posts_updated_at
+    BEFORE UPDATE ON posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_comments_updated_at BEFORE UPDATE ON comments
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_comments_updated_at
+    BEFORE UPDATE ON comments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_nfts_updated_at BEFORE UPDATE ON nfts
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_nfts_updated_at
+    BEFORE UPDATE ON nfts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_listings_updated_at BEFORE UPDATE ON nft_listings
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_listings_updated_at
+    BEFORE UPDATE ON nft_listings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_conversations_updated_at
+    BEFORE UPDATE ON conversations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Function tăng/giảm followers_count
+CREATE TRIGGER update_chat_groups_updated_at
+    BEFORE UPDATE ON chat_groups FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 CREATE OR REPLACE FUNCTION update_follow_counts()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -279,12 +302,11 @@ BEGIN
     END IF;
     RETURN NULL;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trigger_update_follow_counts AFTER INSERT OR DELETE ON follows
-    FOR EACH ROW EXECUTE FUNCTION update_follow_counts();
+CREATE TRIGGER trigger_update_follow_counts
+    AFTER INSERT OR DELETE ON follows FOR EACH ROW EXECUTE FUNCTION update_follow_counts();
 
--- Function tăng/giảm likes_count
 CREATE OR REPLACE FUNCTION update_likes_count()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -295,12 +317,11 @@ BEGIN
     END IF;
     RETURN NULL;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trigger_update_likes_count AFTER INSERT OR DELETE ON likes
-    FOR EACH ROW EXECUTE FUNCTION update_likes_count();
+CREATE TRIGGER trigger_update_likes_count
+    AFTER INSERT OR DELETE ON likes FOR EACH ROW EXECUTE FUNCTION update_likes_count();
 
--- Function tăng/giảm comments_count
 CREATE OR REPLACE FUNCTION update_comments_count()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -311,12 +332,11 @@ BEGIN
     END IF;
     RETURN NULL;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trigger_update_comments_count AFTER INSERT OR DELETE ON comments
-    FOR EACH ROW EXECUTE FUNCTION update_comments_count();
+CREATE TRIGGER trigger_update_comments_count
+    AFTER INSERT OR DELETE ON comments FOR EACH ROW EXECUTE FUNCTION update_comments_count();
 
--- RPC Functions for manual count updates
 CREATE OR REPLACE FUNCTION increment_likes_count(post_id_param UUID)
 RETURNS void AS $$
 BEGIN
@@ -331,7 +351,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Enable RLS
+CREATE OR REPLACE FUNCTION get_total_unread_message_count(target_user_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+    dm_unread INTEGER;
+    group_unread INTEGER;
+BEGIN
+    SELECT COUNT(*)::int INTO dm_unread
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    WHERE c.type = 'direct'
+      AND m.receiver_id = target_user_id
+      AND m.is_read = false;
+
+    SELECT COUNT(*)::int INTO group_unread
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    JOIN chat_group_members gm ON gm.group_id = c.group_id
+    WHERE c.type = 'group'
+      AND gm.user_id = target_user_id
+      AND m.sender_id != target_user_id
+      AND NOT EXISTS (
+          SELECT 1 FROM message_read_status mrs
+          WHERE mrs.message_id = m.id AND mrs.user_id = target_user_id
+      );
+
+    RETURN COALESCE(dm_unread, 0) + COALESCE(group_unread, 0);
+END;
+$$ LANGUAGE plpgsql;
+
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
@@ -344,23 +392,77 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reposts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_group_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message_read_status ENABLE ROW LEVEL SECURITY;
 
--- Policy cho users - public read, self update
 CREATE POLICY "Users are viewable by everyone" ON users FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid()::text = id::text);
 
--- Policy cho posts - public read, owner manage
 CREATE POLICY "Posts are viewable by everyone" ON posts FOR SELECT USING (visibility = 'public' OR user_id::text = auth.uid()::text);
 CREATE POLICY "Users can create posts" ON posts FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
 CREATE POLICY "Users can update own posts" ON posts FOR UPDATE USING (auth.uid()::text = user_id::text);
 CREATE POLICY "Users can delete own posts" ON posts FOR DELETE USING (auth.uid()::text = user_id::text);
 
+CREATE POLICY "Comments are viewable by everyone" ON comments FOR SELECT USING (true);
+CREATE POLICY "Users can create comments" ON comments FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can delete own comments" ON comments FOR DELETE USING (auth.uid()::text = user_id::text);
+
+CREATE POLICY "NFTs are viewable by everyone" ON nfts FOR SELECT USING (true);
+CREATE POLICY "NFT listings are viewable by everyone" ON nft_listings FOR SELECT USING (true);
+CREATE POLICY "Transactions are viewable by participants" ON transactions FOR SELECT USING (auth.uid()::text = seller_id::text OR auth.uid()::text = buyer_id::text);
+
+CREATE POLICY "Users can view own notifications" ON notifications FOR SELECT USING (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can update own notifications" ON notifications FOR UPDATE USING (auth.uid()::text = user_id::text);
+
+CREATE POLICY "Conversations viewable by participants" ON conversations FOR SELECT USING (
+    auth.uid()::text = participant_1_id::text
+    OR auth.uid()::text = participant_2_id::text
+    OR id IN (SELECT conversation_id FROM messages WHERE sender_id::text = auth.uid()::text)
+    OR group_id IN (SELECT group_id FROM chat_group_members WHERE user_id::text = auth.uid()::text)
+);
+CREATE POLICY "Users can create conversations" ON conversations FOR INSERT WITH CHECK (
+    auth.uid()::text = participant_1_id::text
+);
+
+CREATE POLICY "Messages viewable by conversation participants" ON messages FOR SELECT USING (
+    auth.uid()::text = sender_id::text
+    OR auth.uid()::text = receiver_id::text
+    OR conversation_id IN (
+        SELECT id FROM conversations
+        WHERE participant_1_id::text = auth.uid()::text
+           OR participant_2_id::text = auth.uid()::text
+           OR group_id IN (SELECT group_id FROM chat_group_members WHERE user_id::text = auth.uid()::text)
+    )
+);
+CREATE POLICY "Users can send messages" ON messages FOR INSERT WITH CHECK (auth.uid()::text = sender_id::text);
+CREATE POLICY "Users can update own messages" ON messages FOR UPDATE USING (auth.uid()::text = sender_id::text OR auth.uid()::text = receiver_id::text);
+
+CREATE POLICY "Follows are viewable by everyone" ON follows FOR SELECT USING (true);
+CREATE POLICY "Users can follow others" ON follows FOR INSERT WITH CHECK (auth.uid()::text = follower_id::text);
+CREATE POLICY "Users can unfollow" ON follows FOR DELETE USING (auth.uid()::text = follower_id::text);
+
+CREATE POLICY "Likes are viewable by everyone" ON likes FOR SELECT USING (true);
+CREATE POLICY "Users can like posts" ON likes FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can unlike posts" ON likes FOR DELETE USING (auth.uid()::text = user_id::text);
+
 CREATE POLICY "Reposts are viewable by everyone" ON reposts FOR SELECT USING (true);
 CREATE POLICY "Users can create reposts" ON reposts FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
 CREATE POLICY "Users can delete own reposts" ON reposts FOR DELETE USING (auth.uid()::text = user_id::text);
 
--- SAMPLE DATA (Optional - for testing)
-/*
-INSERT INTO users (wallet_address, username, display_name, role, is_profile_complete) VALUES
-    ('0x1234567890abcdef1234567890abcdef12345678', 'admin_user', 'Admin', 'admin', true),
-*/
+CREATE POLICY "Groups viewable by members" ON chat_groups FOR SELECT USING (
+    id IN (SELECT group_id FROM chat_group_members WHERE user_id::text = auth.uid()::text)
+);
+CREATE POLICY "Users can create groups" ON chat_groups FOR INSERT WITH CHECK (auth.uid()::text = created_by::text);
+CREATE POLICY "Group admins can update groups" ON chat_groups FOR UPDATE USING (
+    id IN (SELECT group_id FROM chat_group_members WHERE user_id::text = auth.uid()::text AND role = 'admin')
+);
+
+CREATE POLICY "Group members viewable by group members" ON chat_group_members FOR SELECT USING (
+    group_id IN (SELECT group_id FROM chat_group_members WHERE user_id::text = auth.uid()::text)
+);
+CREATE POLICY "Users can join groups" ON chat_group_members FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can leave groups" ON chat_group_members FOR DELETE USING (auth.uid()::text = user_id::text);
+
+CREATE POLICY "Message read status viewable by user" ON message_read_status FOR SELECT USING (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can mark messages as read" ON message_read_status FOR INSERT WITH CHECK (auth.uid()::text = user_id::text);
