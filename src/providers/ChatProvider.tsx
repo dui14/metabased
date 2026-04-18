@@ -49,6 +49,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const supabaseChannelRef = useRef<any>(null);
   const presenceChannelRef = useRef<any>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentConversationRef = useRef<string | null>(null);
 
   // Kiểm tra user online
   const isUserOnline = useCallback((userId: string) => {
@@ -121,6 +122,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const subscribeToConversation = (conversationId: string) => {
     setCurrentConversationId(conversationId);
+    currentConversationRef.current = conversationId;
     setMessages([]);
 
     if (useLocalDb) {
@@ -163,7 +165,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (useLocalDb && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'leave',
-        conversation_id: currentConversationId,
+        conversation_id: currentConversationRef.current,
       }));
     } else if (supabaseChannelRef.current) {
       supabase?.removeChannel(supabaseChannelRef.current);
@@ -171,6 +173,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
 
     setCurrentConversationId(null);
+    currentConversationRef.current = null;
   };
 
   // Setup WebSocket (local) hoặc Supabase Presence
@@ -187,6 +190,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           type: 'auth',
           user_id: user.id,
         }));
+
+        if (currentConversationRef.current) {
+          ws.send(JSON.stringify({
+            type: 'join',
+            conversation_id: currentConversationRef.current,
+            user_id: user.id,
+          }));
+        }
       };
 
       ws.onmessage = (event) => {

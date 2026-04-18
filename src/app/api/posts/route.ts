@@ -23,13 +23,16 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
     const userId = searchParams.get('user_id');
+    const captionQuery = (searchParams.get('q') || '').trim();
     const includeReposts = searchParams.get('include_reposts') === 'true';
     const noCache = searchParams.get('noCache') === 'true';
     
     // Cache key dựa trên params
     const cacheKey = userId 
       ? `posts:user:${userId}:${includeReposts ? 'with-reposts' : 'posts-only'}:${limit}:${offset}`
-      : `${CACHE_KEYS.POSTS_FEED}:${limit}:${offset}`;
+      : captionQuery
+        ? `${CACHE_KEYS.POSTS_FEED}:caption:${encodeURIComponent(captionQuery.toLowerCase())}:${limit}:${offset}`
+        : `${CACHE_KEYS.POSTS_FEED}:${limit}:${offset}`;
     
     // Nếu yêu cầu fresh data, xóa cache
     if (noCache) {
@@ -45,10 +48,14 @@ export async function GET(request: NextRequest) {
             return await postService.getByUserIdWithReposts(userId, limit, offset);
           }
           return await postService.getByUserId(userId, limit, offset);
-        } else {
-          // Fetch feed chung
-          return await postService.getFeed(limit, offset);
         }
+
+        if (captionQuery) {
+          return await postService.searchPublicByCaption(captionQuery, limit, offset);
+        }
+
+        // Fetch feed chung
+        return await postService.getFeed(limit, offset);
       },
       { ttl: CACHE_TTL.SHORT }
     );

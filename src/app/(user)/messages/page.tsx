@@ -168,6 +168,17 @@ export default function MessagesPage() {
     return dms;
   }, [fetchConversations, fetchGroups]);
 
+  const syncConversationMessages = useCallback(async (conversationId: string) => {
+    try {
+      const res = await fetch(`/api/messages?conversation_id=${conversationId}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch {
+      // ignore transient polling errors
+    }
+  }, []);
+
   useEffect(() => { loadAll(); }, [loadAll]);
 
   // ── Auto-open conversation from ?to= param ─────────────────────────────────
@@ -237,10 +248,7 @@ export default function MessagesPage() {
     setMessages([]);
     setShowGroupInfo(false);
 
-    fetch(`/api/messages?conversation_id=${selected.id}`)
-      .then(r => r.json())
-      .then(d => setMessages(d.messages || []))
-      .catch(() => {});
+    syncConversationMessages(selected.id);
 
     subscribeToConversation(selected.id);
     markAsRead(selected.id);
@@ -254,7 +262,34 @@ export default function MessagesPage() {
     }
 
     return () => { unsubscribeFromConversation(); };
-  }, [selected?.id]);
+  }, [selected?.id, syncConversationMessages]);
+
+  // Poll local DB every 2s to keep messages fresh even if realtime socket is unstable.
+  useEffect(() => {
+    if (!selected?.id) return;
+
+    let isFetching = false;
+    let isActive = true;
+
+    const poll = async () => {
+      if (isFetching || !isActive) return;
+      isFetching = true;
+      try {
+        await syncConversationMessages(selected.id);
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    const intervalId = setInterval(() => {
+      poll();
+    }, 2000);
+
+    return () => {
+      isActive = false;
+      clearInterval(intervalId);
+    };
+  }, [selected?.id, syncConversationMessages]);
 
   // ── Realtime messages ──────────────────────────────────────────────────────
   useEffect(() => {

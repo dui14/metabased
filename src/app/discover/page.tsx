@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Card, Avatar, Button } from '@/components/common';
 import { Search, UserPlus, TrendingUp, Users, Loader2 } from 'lucide-react';
@@ -17,16 +18,33 @@ interface DiscoverUser {
   is_following?: boolean;
 }
 
+interface DiscoverPost {
+  id: string;
+  caption: string | null;
+  created_at: string;
+  likes_count: number;
+  comments_count: number;
+  reposts_count: number;
+  user?: {
+    username?: string;
+    display_name?: string | null;
+  } | null;
+}
+
 const trendingTags = ['#NFT', '#BaseSepolia', '#DigitalArt', '#Web3', '#Crypto', '#Photography'];
 
 export default function DiscoverPage() {
+  const router = useRouter();
   const { t } = useTheme();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'trending'>('users');
   const [users, setUsers] = useState<DiscoverUser[]>([]);
+  const [trendingPosts, setTrendingPosts] = useState<DiscoverPost[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [isOpeningPostId, setIsOpeningPostId] = useState<string | null>(null);
+  const [hasSearchedUsers, setHasSearchedUsers] = useState(false);
+  const [hasSearchedTrending, setHasSearchedTrending] = useState(false);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
 
   const handleFollow = async (targetUserId: string) => {
@@ -103,19 +121,39 @@ export default function DiscoverPage() {
   };
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) return;
     
     try {
       setIsLoading(true);
-      setHasSearched(true);
+
+      if (activeTab === 'trending') {
+        setHasSearchedTrending(true);
+
+        const response = await fetch(
+          `/api/posts?q=${encodeURIComponent(trimmedQuery)}&limit=20&offset=0&noCache=true`
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          setTrendingPosts(data.posts || []);
+        } else {
+          setTrendingPosts([]);
+        }
+
+        return;
+      }
+
+      setHasSearchedUsers(true);
       const response = await fetch('/api/users/discover');
       if (response.ok) {
         const data = await response.json();
         const allUsers = data.users || [];
+        const normalizedQuery = trimmedQuery.toLowerCase();
         const filtered = allUsers.filter(
           (user: DiscoverUser) =>
-            user.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            user.display_name?.toLowerCase().includes(searchQuery.toLowerCase())
+            user.username?.toLowerCase().includes(normalizedQuery) ||
+            user.display_name?.toLowerCase().includes(normalizedQuery)
         );
         setUsers(filtered);
         
@@ -124,9 +162,27 @@ export default function DiscoverPage() {
         }
       }
     } catch (error) {
-      console.log('Error fetching users:', error);
+      console.log(
+        activeTab === 'trending' ? 'Error fetching trending posts:' : 'Error fetching users:',
+        error
+      );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleOpenTrendingPost = async (postId: string) => {
+    try {
+      setIsOpeningPostId(postId);
+
+      await fetch(`/api/posts/${postId}?noCache=true`, {
+        cache: 'no-store',
+      });
+    } catch (error) {
+      console.log('Error preloading post detail:', error);
+    } finally {
+      setIsOpeningPostId(null);
+      router.push(`/post/${postId}`);
     }
   };
 
@@ -140,7 +196,9 @@ export default function DiscoverPage() {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
-            placeholder={t('findUsers')}
+            placeholder={
+              activeTab === 'trending' ? 'Search posts by caption...' : t('findUsers')
+            }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -179,7 +237,7 @@ export default function DiscoverPage() {
         {/* Users Tab */}
         {activeTab === 'users' && (
           <div className="space-y-3">
-            {!hasSearched ? (
+            {!hasSearchedUsers ? (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
                 <p>{t('enterSearchQuery')}</p>
@@ -226,6 +284,59 @@ export default function DiscoverPage() {
         {activeTab === 'trending' && (
           <div className="space-y-4">
             <Card>
+              <h3 className="font-semibold text-dark dark:text-white mb-4">Search caption results</h3>
+              {!hasSearchedTrending ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Enter text and press Search to find matching post captions.
+                </p>
+              ) : isLoading ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
+                </div>
+              ) : trendingPosts.length > 0 ? (
+                <div className="space-y-2">
+                  {trendingPosts.map((post) => (
+                    <button
+                      key={post.id}
+                      type="button"
+                      onClick={() => handleOpenTrendingPost(post.id)}
+                      disabled={isOpeningPostId === post.id}
+                      className="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-primary-300 hover:bg-primary-50/40 dark:hover:bg-gray-800 transition-colors disabled:opacity-70"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-dark dark:text-white break-words">
+                            {post.caption}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            @{post.user?.username || 'unknown'}
+                            {post.user?.display_name ? ` - ${post.user.display_name}` : ''}
+                          </p>
+                          <div className="flex items-center gap-3 text-xs text-gray-400 mt-2">
+                            <span>{post.likes_count || 0} likes</span>
+                            <span>{post.comments_count || 0} comments</span>
+                            <span>{post.reposts_count || 0} reposts</span>
+                          </div>
+                        </div>
+                        <div className="pt-1 text-primary-500">
+                          {isOpeningPostId === post.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <span className="text-xs font-semibold">Open</span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No posts found with this caption text.
+                </p>
+              )}
+            </Card>
+
+            <Card>
               <h3 className="font-semibold text-dark dark:text-white mb-4">{t('trendingTags')}</h3>
               <div className="flex flex-wrap gap-2">
                 {trendingTags.map((tag) => (
@@ -243,11 +354,7 @@ export default function DiscoverPage() {
             <Card>
               <h3 className="font-semibold text-dark dark:text-white mb-4">{t('suggestedForYou')}</h3>
               <div className="space-y-3">
-                {isLoading ? (
-                  <div className="flex justify-center py-4">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
-                  </div>
-                ) : users.length > 0 ? (
+                {users.length > 0 ? (
                   users.slice(0, 3).map((user) => (
                     <div key={user.id} className="flex items-center justify-between py-2">
                       <Link href={`/user/${user.username}`} className="flex items-center gap-3">
