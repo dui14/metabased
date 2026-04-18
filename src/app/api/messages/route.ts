@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     if (useLocalDb) {
       const query = await getLocalDbQuery();
-      
+
       const result = await query(`
         SELECT 
           m.*,
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
         LIMIT $2 OFFSET $3
       `, [conversationId, limit, offset]);
 
-      return NextResponse.json({ 
+      return NextResponse.json({
         messages: result.rows.reverse()
       });
     }
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
                   message: 'sent a message in a group',
                   referenceType: 'conversation',
                   referenceId: conversation_id,
-                }).catch(() => {});
+                }).catch(() => { });
               }
             }
           }

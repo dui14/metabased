@@ -1,8 +1,8 @@
 'use client';
 
 import { cn, formatAddress, formatDate, formatNumber } from '@/lib/utils';
-import { Avatar, Badge, Button, Card } from '@/components/common';
-import { Heart, Share, Sparkles, ExternalLink, Check, Repeat2 } from 'lucide-react';
+import { Avatar, Badge, Button, Card, Modal } from '@/components/common';
+import { Heart, Share, Sparkles, ExternalLink, Check, Repeat2, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -12,6 +12,8 @@ import { useAuth } from '@/providers';
 import { buyPostListingOnChain } from '@/lib/nft-mint';
 import { formatTokenIdShort, resolveNftPreview } from '@/lib/nft-preview';
 import type { Post, Comment } from '@/types';
+
+type BuyStatus = 'idle' | 'confirming' | 'pending' | 'success' | 'error';
 
 interface PostDetailProps {
   post: Post;
@@ -33,7 +35,10 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
   const [localComments, setLocalComments] = useState<Comment[]>(comments);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isBuying, setIsBuying] = useState(false);
+  const [buyStatus, setBuyStatus] = useState<BuyStatus>('idle');
+  const [buyTxHash, setBuyTxHash] = useState('');
+  const [buyErrorMessage, setBuyErrorMessage] = useState('');
+  const [showBuyModal, setShowBuyModal] = useState(false);
   const [nftPreviewImage, setNftPreviewImage] = useState<string | null>(null);
   const [nftTokenUri, setNftTokenUri] = useState<string | null>(null);
 
@@ -252,26 +257,37 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
   };
 
   const handleBuyNft = async () => {
-    if (!isListed || !nftListingId || !nftPrice) {
-      alert('Listing is not available');
-      return;
-    }
+    if (!isListed || !nftListingId || !nftPrice) return;
 
-    setIsBuying(true);
+    setBuyStatus('confirming');
+    setBuyTxHash('');
+    setBuyErrorMessage('');
+    setShowBuyModal(true);
+
     try {
+      setBuyStatus('pending');
       const result = await buyPostListingOnChain({
         listingId: nftListingId,
         quantity: 1,
         unitPriceEth: nftPrice,
         walletConnector,
       });
-      alert(`Buy success. Tx: ${result.txHash}`);
+      setBuyTxHash(result.txHash);
+      setBuyStatus('success');
+      // Update post state to reflect it's no longer listed
+      onUpdate?.({ ...post, nft_status: 'sold' } as Post);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to buy NFT';
-      alert(message);
-    } finally {
-      setIsBuying(false);
+      setBuyErrorMessage(message);
+      setBuyStatus('error');
     }
+  };
+
+  const closeBuyModal = () => {
+    setShowBuyModal(false);
+    setBuyStatus('idle');
+    setBuyTxHash('');
+    setBuyErrorMessage('');
   };
 
   return (
@@ -440,8 +456,19 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
               <p className="text-xs text-gray-400">Listing ID: {nftListingId || '-'}</p>
             </div>
             {isListed ? (
-              <Button variant="primary" size="lg" className="px-8" onClick={handleBuyNft} disabled={isBuying}>
-                {isBuying ? 'Buying...' : 'Buy NFT'}
+              <Button
+                variant="primary"
+                size="lg"
+                className="px-8"
+                onClick={handleBuyNft}
+                disabled={buyStatus === 'pending' || buyStatus === 'confirming'}
+              >
+                {(buyStatus === 'pending' || buyStatus === 'confirming') ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin" />
+                    Buying...
+                  </span>
+                ) : 'Buy NFT'}
               </Button>
             ) : (
               <Badge variant="default" size="sm">Sell in Create &gt; Sell</Badge>
@@ -457,6 +484,67 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
           </div>
         </Card>
       )}
+
+      {/* Buy NFT Modal */}
+      <Modal
+        isOpen={showBuyModal}
+        onClose={buyStatus === 'success' || buyStatus === 'error' ? closeBuyModal : () => {}}
+        title="Buy NFT"
+        size="sm"
+      >
+        {(buyStatus === 'confirming' || buyStatus === 'pending') && (
+          <div className="text-center py-8">
+            <Loader2 size={48} className="mx-auto text-primary-500 animate-spin mb-4" />
+            <p className="font-semibold text-dark dark:text-white">
+              {buyStatus === 'confirming' ? 'Waiting for wallet confirmation...' : 'Processing transaction on-chain...'}
+            </p>
+            <p className="text-sm text-gray-400 mt-2">Please don&apos;t close this window</p>
+          </div>
+        )}
+
+        {buyStatus === 'success' && (
+          <div className="text-center py-6">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 size={32} className="text-green-500" />
+            </div>
+            <h4 className="text-lg font-semibold text-dark dark:text-white mb-1">Purchase Successful!</h4>
+            <p className="text-sm text-gray-500 mb-4">You now own this NFT on Base Sepolia</p>
+            {buyTxHash && (
+              <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl mb-4 text-left">
+                <p className="text-xs text-gray-500 mb-1">Transaction Hash</p>
+                <a
+                  href={`https://sepolia.basescan.org/tx/${buyTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-mono text-primary-500 hover:underline break-all flex items-center gap-1"
+                >
+                  {buyTxHash.slice(0, 20)}...{buyTxHash.slice(-10)}
+                  <ExternalLink size={12} className="flex-shrink-0" />
+                </a>
+              </div>
+            )}
+            <Button variant="primary" className="w-full" onClick={closeBuyModal}>
+              Done
+            </Button>
+          </div>
+        )}
+
+        {buyStatus === 'error' && (
+          <div className="text-center py-6">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={32} className="text-red-500" />
+            </div>
+            <h4 className="text-lg font-semibold text-dark dark:text-white mb-2">Transaction Failed</h4>
+            {buyErrorMessage && (
+              <p className="text-sm text-red-500 mb-4 break-words">{buyErrorMessage}</p>
+            )}
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={closeBuyModal}>Cancel</Button>
+              <Button variant="primary" className="flex-1" onClick={() => { closeBuyModal(); handleBuyNft(); }}>Retry</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Comments Section */}
       <Card>

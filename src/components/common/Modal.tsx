@@ -44,17 +44,17 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) =>
       {/* Modal content */}
       <div
         className={cn(
-          'relative w-full mx-4 bg-white rounded-2xl shadow-elevated animate-fadeIn',
+          'relative w-full mx-4 bg-white dark:bg-gray-900 rounded-2xl shadow-elevated animate-fadeIn border border-gray-100 dark:border-gray-800',
           sizeMap[size]
         )}
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-            <h3 className="text-lg font-semibold text-dark">{title}</h3>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
+            <h3 className="text-lg font-semibold text-dark dark:text-white">{title}</h3>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg text-gray-400 hover:text-dark hover:bg-gray-100 transition-colors"
+              className="p-1 rounded-lg text-gray-400 hover:text-dark dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               <X size={20} />
             </button>
@@ -66,7 +66,7 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) =>
           {!title && (
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 p-1 rounded-lg text-gray-400 hover:text-dark hover:bg-gray-100 transition-colors"
+              className="absolute top-4 right-4 p-1 rounded-lg text-gray-400 hover:text-dark dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               <X size={20} />
             </button>

@@ -308,6 +308,72 @@ export const postService = {
     return data || [];
   },
 
+  // Search public posts by caption for Discover > Trending
+  async searchPublicByCaption(searchText: string, limit: number = 20, offset: number = 0): Promise<any[]> {
+    const normalizedSearch = searchText.trim();
+    if (!normalizedSearch) {
+      return [];
+    }
+
+    if (useLocalDb) {
+      try {
+        const query = await getDbQuery();
+        const result = await query(
+          `SELECT 
+            p.*,
+            json_build_object(
+              'id', u.id,
+              'username', u.username,
+              'display_name', u.display_name,
+              'avatar_url', u.avatar_url,
+              'wallet_address', u.wallet_address
+            ) as user
+           FROM posts p
+           LEFT JOIN users u ON p.user_id = u.id
+           WHERE p.visibility = 'public'
+             AND COALESCE(p.caption, '') ILIKE $1
+           ORDER BY
+             (COALESCE(p.likes_count, 0) + COALESCE(p.comments_count, 0) + COALESCE(p.reposts_count, 0)) DESC,
+             p.created_at DESC
+           LIMIT $2 OFFSET $3`,
+          [`%${normalizedSearch}%`, limit, offset]
+        );
+        return result.rows || [];
+      } catch (error) {
+        console.error('Error searching posts by caption:', error);
+        throw error;
+      }
+    }
+
+    // Supabase
+    const { data, error } = await supabase!
+      .from('posts')
+      .select(`
+        *,
+        user:users!posts_user_id_fkey (
+          id,
+          username,
+          display_name,
+          avatar_url,
+          wallet_address
+        )
+      `)
+      .eq('visibility', 'public')
+      .ilike('caption', `%${normalizedSearch}%`)
+      .order('likes_count', { ascending: false })
+      .order('comments_count', { ascending: false })
+      .order('reposts_count', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      console.error('Error searching posts by caption:', error);
+      throw error;
+    }
+
+    return data || [];
+  },
+
   // Get posts by user ID
   async getByUserId(userId: string, limit: number = 20, offset: number = 0): Promise<any[]> {
     if (useLocalDb) {
