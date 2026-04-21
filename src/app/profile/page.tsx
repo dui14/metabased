@@ -28,7 +28,7 @@ export default function ProfilePage() {
       
       try {
         setIsLoading(true);
-        const response = await fetch(`/api/posts?user_id=${user.id}&include_reposts=true`);
+        const response = await fetch(`/api/posts?user_id=${user.id}&include_reposts=true&viewer_id=${user.id}`);
         if (response.ok) {
           const data = await response.json();
           setPosts(data.posts || []);

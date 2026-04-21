@@ -73,7 +73,17 @@ export async function GET(
       .order('role', { ascending: false })
       .order('joined_at', { ascending: true });
 
-    return NextResponse.json({ group, members: members || [] });
+    const normalizedMembers = (members || []).map((member: any) => ({
+      ...member,
+      user_id: member.user_id || member.user?.id,
+      username: member.username || member.user?.username || '',
+      display_name: member.display_name || member.user?.display_name || member.user?.username || '',
+      avatar_url: member.avatar_url || member.user?.avatar_url || '',
+      is_online: typeof member.is_online === 'boolean' ? member.is_online : !!member.user?.is_online,
+      last_seen_at: member.last_seen_at || member.user?.last_seen_at || null,
+    }));
+
+    return NextResponse.json({ group, members: normalizedMembers });
   } catch (error) {
     console.error('Error in GET /api/groups/[id]:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

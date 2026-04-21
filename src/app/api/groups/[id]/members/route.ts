@@ -11,7 +11,7 @@ async function getLocalDbQuery() {
   return query;
 }
 
-// POST: thêm member vào group (chỉ admin)
+// POST: thêm member vào group (mọi member trong nhóm đều có thể thêm)
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -23,7 +23,7 @@ export async function POST(
 
     if (!user_id || !member_id) {
       return NextResponse.json(
-        { error: 'user_id (admin) and member_id are required' },
+        { error: 'user_id and member_id are required' },
         { status: 400 }
       );
     }
@@ -31,15 +31,15 @@ export async function POST(
     if (useLocalDb) {
       const query = await getLocalDbQuery();
 
-      // Kiểm tra quyền admin
-      const adminCheck = await query(
+      // Kiểm tra người thao tác có nằm trong nhóm
+      const memberCheck = await query(
         `SELECT 1 FROM chat_group_members
-         WHERE group_id = $1 AND user_id = $2 AND role = 'admin'`,
+         WHERE group_id = $1 AND user_id = $2`,
         [groupId, user_id]
       );
 
-      if (adminCheck.rows.length === 0) {
-        return NextResponse.json({ error: 'Only admins can add members' }, { status: 403 });
+      if (memberCheck.rows.length === 0) {
+        return NextResponse.json({ error: 'Only group members can add new members' }, { status: 403 });
       }
 
       // Thêm member
@@ -63,17 +63,16 @@ export async function POST(
       return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
     }
 
-    // Kiểm tra admin
-    const { data: adminData } = await supabase
+    // Kiểm tra user là thành viên trong nhóm
+    const { data: memberData } = await supabase
       .from('chat_group_members')
       .select('id')
       .eq('group_id', groupId)
       .eq('user_id', user_id)
-      .eq('role', 'admin')
       .single();
 
-    if (!adminData) {
-      return NextResponse.json({ error: 'Only admins can add members' }, { status: 403 });
+    if (!memberData) {
+      return NextResponse.json({ error: 'Only group members can add new members' }, { status: 403 });
     }
 
     const { data, error } = await supabase

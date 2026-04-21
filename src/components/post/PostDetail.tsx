@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers';
 import { buyPostListingOnChain } from '@/lib/nft-mint';
 import { formatTokenIdShort, resolveNftPreview } from '@/lib/nft-preview';
+import { useMarketplaceListingStatus } from '@/lib/useMarketplaceListingStatus';
 import type { Post, Comment } from '@/types';
 
 type BuyStatus = 'idle' | 'confirming' | 'pending' | 'success' | 'error';
@@ -46,6 +47,12 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
   const nftPrice = post.nft_price?.trim() || null;
   const nftListingId = post.nft_listing_id || null;
   const isListed = nftStatus === 'listed' && Boolean(nftListingId && nftPrice);
+  const { listing: liveListing, refresh: refreshListing } = useMarketplaceListingStatus(nftListingId, {
+    enabled: isListed,
+    pollingMs: 5000,
+  });
+  const isSoldOut = nftStatus === 'sold' || (isListed && !!liveListing?.isSoldOut);
+  const canBuyNft = isListed && !isSoldOut;
   const nftDisplayImage = post.image_url || nftPreviewImage;
   const nftActionTime = nftStatus === 'listed' ? post.updated_at : post.created_at;
   const walletConnector = primaryWallet?.connector;
@@ -257,7 +264,7 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
   };
 
   const handleBuyNft = async () => {
-    if (!isListed || !nftListingId || !nftPrice) return;
+    if (!canBuyNft || !nftListingId || !nftPrice) return;
 
     setBuyStatus('confirming');
     setBuyTxHash('');
@@ -274,8 +281,12 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
       });
       setBuyTxHash(result.txHash);
       setBuyStatus('success');
-      // Update post state to reflect it's no longer listed
-      onUpdate?.({ ...post, nft_status: 'sold' } as Post);
+      await refreshListing();
+
+      // If it was the last available item, immediately reflect sold state.
+      if ((liveListing?.remainingQuantity ?? 1) <= 1) {
+        onUpdate?.({ ...post, nft_status: 'sold' } as Post);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to buy NFT';
       setBuyErrorMessage(message);
@@ -424,6 +435,14 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
               <span className="text-gray-500">Type</span>
               <span className="text-dark dark:text-white">{post.nft_contract_type || '-'}</span>
             </div>
+            {isListed && liveListing && (
+              <div className="flex justify-between items-center py-2">
+                <span className="text-gray-500">Available</span>
+                <span className="text-dark dark:text-white">
+                  {liveListing.remainingQuantity}/{liveListing.quantity}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span className="text-gray-500">Time</span>
               <span className="text-dark dark:text-white">{new Date(nftActionTime).toLocaleString('vi-VN')}</span>
@@ -455,7 +474,7 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
               <p className="text-2xl font-bold text-dark dark:text-white">{nftPrice ? `${nftPrice} ETH` : '-'}</p>
               <p className="text-xs text-gray-400">Listing ID: {nftListingId || '-'}</p>
             </div>
-            {isListed ? (
+            {canBuyNft ? (
               <Button
                 variant="primary"
                 size="lg"
@@ -470,6 +489,8 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
                   </span>
                 ) : 'Buy NFT'}
               </Button>
+            ) : isListed || nftStatus === 'sold' ? (
+              <Badge variant="default" size="sm">Sold out</Badge>
             ) : (
               <Badge variant="default" size="sm">Sell in Create &gt; Sell</Badge>
             )}

@@ -16,7 +16,7 @@ export function emitMessagesUpdated() {
  * Pattern tương tự useNotificationUnreadCount
  */
 export function useMessageUnreadCount(options?: { pollingMs?: number; enabled?: boolean }) {
-  const pollingMs = options?.pollingMs ?? 30000; // 30s default
+  const pollingMs = options?.pollingMs ?? 5000;
   const enabled = options?.enabled ?? true;
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);

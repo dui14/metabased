@@ -38,16 +38,20 @@ export const ThemeProvider = ({ children }: ThemeProviderProps) => {
     setMounted(true);
     const savedTheme = localStorage.getItem('theme') as Theme | null;
     const savedLanguage = localStorage.getItem('language') as Language | null;
-    
-    if (savedTheme) {
-      setThemeState(savedTheme);
-      document.documentElement.classList.toggle('dark', savedTheme === 'dark');
-    }
-    
-    if (savedLanguage) {
-      setLanguageState(savedLanguage);
-    }
+
+    const resolvedTheme = savedTheme || 'light';
+    const resolvedLanguage = savedLanguage || 'en';
+
+    setThemeState(resolvedTheme);
+    setLanguageState(resolvedLanguage);
+    document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
+    document.documentElement.lang = resolvedLanguage === 'vi' ? 'vi' : 'en';
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    document.documentElement.lang = language === 'vi' ? 'vi' : 'en';
+  }, [mounted, language]);
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
