@@ -374,10 +374,55 @@ export const postService = {
     return data || [];
   },
 
-  // Get posts by user ID
-  async getByUserId(userId: string, limit: number = 20, offset: number = 0): Promise<any[]> {
+  async canViewerSeeFollowersPosts(userId: string, viewerId?: string | null): Promise<boolean> {
+    if (!viewerId || viewerId === userId) {
+      return viewerId === userId;
+    }
+
     if (useLocalDb) {
       try {
+        const query = await getDbQuery();
+        const result = await query(
+          `SELECT 1
+           FROM follows
+           WHERE follower_id = $1
+             AND following_id = $2
+           LIMIT 1`,
+          [viewerId, userId]
+        );
+        return result.rows.length > 0;
+      } catch (error) {
+        console.error('Error checking follower visibility permissions:', error);
+        return false;
+      }
+    }
+
+    const { data, error } = await supabase!
+      .from('follows')
+      .select('id')
+      .eq('follower_id', viewerId)
+      .eq('following_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error checking follower visibility permissions:', error);
+      return false;
+    }
+
+    return !!data;
+  },
+
+  // Get posts by user ID
+  async getByUserId(userId: string, limit: number = 20, offset: number = 0, viewerId?: string | null): Promise<any[]> {
+    if (useLocalDb) {
+      try {
+        const canSeeFollowers = await this.canViewerSeeFollowersPosts(userId, viewerId);
+        const visibilityCondition = viewerId === userId
+          ? ''
+          : canSeeFollowers
+            ? `AND p.visibility IN ('public', 'followers')`
+            : `AND p.visibility = 'public'`;
+
         const query = await getDbQuery();
         const result = await query(
           `SELECT 
@@ -392,6 +437,7 @@ export const postService = {
            FROM posts p
            LEFT JOIN users u ON p.user_id = u.id
            WHERE p.user_id = $1
+             ${visibilityCondition}
            ORDER BY p.created_at DESC
            LIMIT $2 OFFSET $3`,
           [userId, limit, offset]
@@ -404,7 +450,9 @@ export const postService = {
     }
     
     // Supabase
-    const { data, error } = await supabase!
+    const canSeeFollowers = await this.canViewerSeeFollowersPosts(userId, viewerId);
+
+    let queryBuilder = supabase!
       .from('posts')
       .select(`
         *,
@@ -420,6 +468,16 @@ export const postService = {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
+    if (viewerId !== userId) {
+      if (canSeeFollowers) {
+        queryBuilder = queryBuilder.in('visibility', ['public', 'followers']);
+      } else {
+        queryBuilder = queryBuilder.eq('visibility', 'public');
+      }
+    }
+
+    const { data, error } = await queryBuilder;
+
     if (error) {
       console.error('Error fetching user posts:', error);
       throw error;
@@ -428,9 +486,16 @@ export const postService = {
     return data || [];
   },
 
-  async getByUserIdWithReposts(userId: string, limit: number = 20, offset: number = 0): Promise<any[]> {
+  async getByUserIdWithReposts(userId: string, limit: number = 20, offset: number = 0, viewerId?: string | null): Promise<any[]> {
     if (useLocalDb) {
       try {
+        const canSeeFollowers = await this.canViewerSeeFollowersPosts(userId, viewerId);
+        const visibilityCondition = viewerId === userId
+          ? ''
+          : canSeeFollowers
+            ? `AND p.visibility IN ('public', 'followers')`
+            : `AND p.visibility = 'public'`;
+
         const query = await getDbQuery();
 
         const ownPostsResult = await query(
@@ -448,7 +513,8 @@ export const postService = {
             NULL::uuid as repost_user_id
            FROM posts p
            LEFT JOIN users u ON p.user_id = u.id
-           WHERE p.user_id = $1`,
+             WHERE p.user_id = $1
+             ${visibilityCondition}`,
           [userId]
         );
 
@@ -489,7 +555,9 @@ export const postService = {
       }
     }
 
-    const { data: ownPosts, error: ownError } = await supabase!
+    const canSeeFollowers = await this.canViewerSeeFollowersPosts(userId, viewerId);
+
+    let ownPostsQuery = supabase!
       .from('posts')
       .select(`
         *,
@@ -503,6 +571,16 @@ export const postService = {
       `)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
+
+    if (viewerId !== userId) {
+      if (canSeeFollowers) {
+        ownPostsQuery = ownPostsQuery.in('visibility', ['public', 'followers']);
+      } else {
+        ownPostsQuery = ownPostsQuery.eq('visibility', 'public');
+      }
+    }
+
+    const { data: ownPosts, error: ownError } = await ownPostsQuery;
 
     if (ownError) {
       console.error('Error fetching own posts:', ownError);

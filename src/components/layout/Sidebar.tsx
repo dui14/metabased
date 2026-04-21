@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Home, Search, Bell, Plus, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/providers';
+import { useAuth, useTheme } from '@/providers';
 import { Avatar } from '@/components/common';
 import { useNotificationUnreadCount } from '@/lib/useNotificationUnreadCount';
 import { useMessageUnreadCount } from '@/lib/useMessageUnreadCount';
@@ -19,20 +19,21 @@ interface SidebarProps {
 const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCloseMobile }: SidebarProps) => {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { t, language } = useTheme();
   const { unreadCount } = useNotificationUnreadCount({ enabled: Boolean(user) });
   const { unreadCount: messageUnreadCount } = useMessageUnreadCount({ enabled: Boolean(user) });
 
   const navItems = [
-    { icon: Home, label: 'Home', href: '/home' },
-    { icon: Search, label: 'Discover', href: '/discover' },
-    { icon: Bell, label: 'Notifications', href: '/notifications' },
-    { icon: MessageSquare, label: 'Messages', href: '/messages' },
+    { icon: Home, label: t('home'), href: '/home' },
+    { icon: Search, label: t('discover'), href: '/discover' },
+    { icon: Bell, label: t('notifications'), href: '/notifications' },
+    { icon: MessageSquare, label: t('messages'), href: '/messages' },
   ];
 
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-40 h-screen border-r border-gray-100 bg-white flex flex-col w-72 transition-[width,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        'fixed left-0 top-0 z-40 h-screen border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col w-72 transition-[width,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         'md:translate-x-0',
         collapsed ? 'md:w-20' : 'md:w-72'
@@ -41,7 +42,7 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="absolute -right-3 top-6 z-40 hidden md:inline-flex size-8 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition-all duration-300 hover:scale-105 hover:text-primary-500"
+        className="absolute -right-3 top-6 z-40 hidden md:inline-flex size-8 items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-300 shadow-sm transition-all duration-300 hover:scale-105 hover:text-primary-500"
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         aria-pressed={collapsed}
       >
@@ -66,7 +67,7 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
       <button
         type="button"
         onClick={onCloseMobile}
-        className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 md:hidden"
+        className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 md:hidden"
         aria-label="Close sidebar"
       >
         ✕
@@ -84,6 +85,7 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
             <span
               className={cn(
                 'text-xl font-bold text-dark truncate transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                'dark:text-white',
                 collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[10rem] opacity-100 translate-x-0'
               )}
             >
@@ -106,8 +108,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
                     'group relative flex items-center rounded-xl text-base font-medium transition-all duration-300',
                     collapsed ? 'justify-center px-2 py-3.5' : 'gap-3 px-4 py-3',
                     isActive
-                      ? 'bg-primary-50 text-primary-500'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-dark'
+                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-500'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-dark dark:hover:text-white'
                   )}
                 >
                   <span className="relative inline-flex">
@@ -176,23 +178,23 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
                 collapsed ? 'max-w-0 opacity-0 -translate-x-1' : 'max-w-[8rem] opacity-100 translate-x-0'
               )}
             >
-              Create Post
+              {t('createPost')}
             </span>
             {collapsed && (
               <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs text-white opacity-0 -translate-x-1 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 z-50">
-                Create Post
+                {t('createPost')}
               </span>
             )}
           </Link>
         </div>
       </nav>
 
-      <div className={cn('border-t border-gray-100', collapsed ? 'p-2 pt-3' : 'p-4')}>
+      <div className={cn('border-t border-gray-100 dark:border-gray-800', collapsed ? 'p-2 pt-3' : 'p-4')}>
         <Link
           href="/profile"
           onClick={onCloseMobile}
           className={cn(
-            'group relative rounded-xl hover:bg-gray-50 transition-colors flex items-center',
+            'group relative rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center',
             collapsed ? 'justify-center p-3' : 'gap-3 p-3'
           )}
         >
@@ -207,12 +209,14 @@ const Sidebar = ({ collapsed = false, onToggleCollapse, mobileOpen = false, onCl
               collapsed ? 'max-w-0 opacity-0 -translate-x-1' : 'max-w-[10rem] opacity-100 translate-x-0'
             )}
           >
-            <p className="text-sm font-semibold text-dark truncate">{user?.display_name || 'Chưa đặt tên'}</p>
+            <p className="text-sm font-semibold text-dark dark:text-white truncate">
+              {user?.display_name || (language === 'vi' ? 'Chưa đặt tên' : 'No display name')}
+            </p>
             <p className="text-xs text-gray-400 truncate">@{user?.username || 'username'}</p>
           </div>
           {collapsed && (
             <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs text-white opacity-0 -translate-x-1 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 z-50">
-              Profile
+              {t('profile')}
             </span>
           )}
         </Link>

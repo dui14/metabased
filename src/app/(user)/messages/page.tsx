@@ -4,13 +4,14 @@ import { MainLayout } from '@/components/layout';
 import { Avatar } from '@/components/common';
 import {
   Search, Send, MessageSquare, Loader2, ArrowLeft,
-  Settings, Users, X, UserMinus, ChevronRight,
+  Settings, Users, X, UserMinus, UserPlus,
 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth, useChat } from '@/providers';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { emitMessagesUpdated } from '@/lib/useMessageUnreadCount';
+import Link from 'next/link';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,8 @@ function formatTime(ts: string) {
   return new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
 
+const CHAT_POLLING_MS = 5000;
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MessagesPage() {
@@ -121,6 +124,11 @@ export default function MessagesPage() {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [userPool, setUserPool] = useState<OtherUser[]>([]);
   const [memberSearch, setMemberSearch] = useState('');
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [addMemberPool, setAddMemberPool] = useState<OtherUser[]>([]);
+  const [addMemberSearch, setAddMemberSearch] = useState('');
+  const [isLoadingAddMemberPool, setIsLoadingAddMemberPool] = useState(false);
+  const [addingMemberId, setAddingMemberId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -176,6 +184,17 @@ export default function MessagesPage() {
       setMessages(data.messages || []);
     } catch {
       // ignore transient polling errors
+    }
+  }, []);
+
+  const fetchGroupMembers = useCallback(async (groupId: string) => {
+    try {
+      const response = await fetch(`/api/groups/${groupId}`, { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      setGroupMembers(data.members || []);
+    } catch {
+      // ignore transient group member refresh errors
     }
   }, []);
 
@@ -255,16 +274,13 @@ export default function MessagesPage() {
     emitMessagesUpdated(); // Clear sidebar badge immediately
 
     if (selected.type === 'group' && selected.group_id) {
-      fetch(`/api/groups/${selected.group_id}`)
-        .then(r => r.json())
-        .then(d => setGroupMembers(d.members || []))
-        .catch(() => {});
+      void fetchGroupMembers(selected.group_id);
     }
 
     return () => { unsubscribeFromConversation(); };
-  }, [selected?.id, syncConversationMessages]);
+  }, [selected?.id, syncConversationMessages, fetchGroupMembers]);
 
-  // Poll local DB every 2s to keep messages fresh even if realtime socket is unstable.
+  // Poll every 5s to keep selected conversation fresh even when realtime is unstable.
   useEffect(() => {
     if (!selected?.id) return;
 
@@ -283,13 +299,59 @@ export default function MessagesPage() {
 
     const intervalId = setInterval(() => {
       poll();
-    }, 2000);
+    }, CHAT_POLLING_MS);
 
     return () => {
       isActive = false;
       clearInterval(intervalId);
     };
   }, [selected?.id, syncConversationMessages]);
+
+  // Poll conversations + groups every 5s so new DMs/group additions appear without reloading.
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let isActive = true;
+    let isRefreshing = false;
+
+    const refreshConversations = async () => {
+      if (isRefreshing || !isActive) return;
+      isRefreshing = true;
+      try {
+        const [dms, groups] = await Promise.all([fetchConversations(), fetchGroups()]);
+        if (!isActive) return;
+
+        const nextConversations = [...dms, ...groups];
+        setConversations(nextConversations);
+
+        if (selected?.id) {
+          const refreshedSelected = nextConversations.find((item) => item.id === selected.id) || null;
+          if (!refreshedSelected) {
+            setSelected(null);
+            setMessages([]);
+            setShowGroupInfo(false);
+            setGroupMembers([]);
+          } else {
+            setSelected(refreshedSelected);
+            if (refreshedSelected.type === 'group' && refreshedSelected.group_id) {
+              void fetchGroupMembers(refreshedSelected.group_id);
+            }
+          }
+        }
+      } finally {
+        isRefreshing = false;
+      }
+    };
+
+    const intervalId = setInterval(() => {
+      void refreshConversations();
+    }, CHAT_POLLING_MS);
+
+    return () => {
+      isActive = false;
+      clearInterval(intervalId);
+    };
+  }, [user?.id, selected?.id, fetchConversations, fetchGroups, fetchGroupMembers]);
 
   // ── Realtime messages ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -402,6 +464,69 @@ export default function MessagesPage() {
     } catch (e) { console.error(e); }
   };
 
+  const openAddMemberModal = async () => {
+    if (!selected?.group_id || !user?.id) return;
+
+    setShowAddMemberModal(true);
+    setIsLoadingAddMemberPool(true);
+    setAddMemberSearch('');
+
+    try {
+      const [followingRes, discoverRes] = await Promise.all([
+        fetch(`/api/users/following?user_id=${user.id}`),
+        fetch('/api/users/discover?limit=100'),
+      ]);
+
+      const followingData = followingRes.ok ? await followingRes.json() : { users: [] };
+      const discoverData = discoverRes.ok ? await discoverRes.json() : { users: [] };
+
+      const existingMemberIds = new Set(groupMembers.map((member) => member.user_id));
+      const byId = new Map<string, OtherUser>();
+      [...(followingData.users || []), ...(discoverData.users || [])].forEach((candidate: OtherUser) => {
+        if (!candidate?.id) return;
+        if (candidate.id === user.id) return;
+        if (existingMemberIds.has(candidate.id)) return;
+        byId.set(candidate.id, candidate);
+      });
+
+      setAddMemberPool(Array.from(byId.values()));
+    } catch {
+      setAddMemberPool([]);
+    } finally {
+      setIsLoadingAddMemberPool(false);
+    }
+  };
+
+  const handleAddMember = async (memberId: string) => {
+    if (!selected?.group_id || !user?.id) return;
+
+    setAddingMemberId(memberId);
+    try {
+      const response = await fetch(`/api/groups/${selected.group_id}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, member_id: memberId }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        alert(data.error || 'Không thể thêm thành viên');
+        return;
+      }
+
+      setAddMemberPool((prev) => prev.filter((item) => item.id !== memberId));
+      if (selected.group_id) {
+        await fetchGroupMembers(selected.group_id);
+      }
+      const [dms, groups] = await Promise.all([fetchConversations(), fetchGroups()]);
+      setConversations([...dms, ...groups]);
+    } catch {
+      alert('Có lỗi xảy ra khi thêm thành viên');
+    } finally {
+      setAddingMemberId(null);
+    }
+  };
+
   // ── Filtered list ──────────────────────────────────────────────────────────
   const filteredConversations = conversations.filter(c => {
     const matchTab = activeTab === 'direct' ? (!c.type || c.type === 'direct') : c.type === 'group';
@@ -413,6 +538,10 @@ export default function MessagesPage() {
 
   const filteredUserPool = userPool.filter(u =>
     `${u.display_name} ${u.username}`.toLowerCase().includes(memberSearch.toLowerCase())
+  );
+
+  const filteredAddMemberPool = addMemberPool.filter((item) =>
+    `${item.display_name} ${item.username}`.toLowerCase().includes(addMemberSearch.toLowerCase())
   );
 
   // ─── Render ─────────────────────────────────────────────────────────────────
@@ -598,7 +727,13 @@ export default function MessagesPage() {
                           {!isMe && isGroup && (
                             <div className="w-8 flex-shrink-0">
                               {isLastInGroup && sender ? (
-                                <Avatar src={sender.avatar_url} alt={sender.display_name} size="sm" />
+                                sender.username ? (
+                                  <Link href={`/user/${sender.username}`}>
+                                    <Avatar src={sender.avatar_url} alt={sender.display_name} size="sm" />
+                                  </Link>
+                                ) : (
+                                  <Avatar src={sender.avatar_url} alt={sender.display_name} size="sm" />
+                                )
                               ) : (
                                 <div className="w-8" />
                               )}
@@ -609,9 +744,15 @@ export default function MessagesPage() {
                           <div className={cn('flex flex-col max-w-[420px]', isMe ? 'items-end' : 'items-start')}>
                             {/* Sender name — inside column, aligns with bubble */}
                             {showSenderHeader && sender && (
-                              <span className="text-xs text-gray-500 font-medium mb-0.5 px-1">
-                                {sender.display_name || sender.username}
-                              </span>
+                              sender.username ? (
+                                <Link href={`/user/${sender.username}`} className="text-xs text-gray-500 font-medium mb-0.5 px-1 hover:underline">
+                                  {sender.display_name || sender.username}
+                                </Link>
+                              ) : (
+                                <span className="text-xs text-gray-500 font-medium mb-0.5 px-1">
+                                  {sender.display_name || sender.username}
+                                </span>
+                              )
                             )}
 
                             {/* Bubble */}
@@ -676,22 +817,45 @@ export default function MessagesPage() {
                     </button>
                   </div>
                   <div className="flex-1 overflow-y-auto py-2">
-                    {groupMembers.map(m => (
-                      <div key={m.user_id} className="flex items-center gap-2.5 px-4 py-2 hover:bg-gray-50">
-                        <div className="relative flex-shrink-0">
-                          <Avatar src={m.avatar_url} alt={m.display_name} size="sm" />
-                          <span className={cn('absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white',
-                            m.is_online || isUserOnline(m.user_id) ? 'bg-green-500' : 'bg-gray-300'
-                          )} />
+                    {groupMembers.map(m => {
+                      const itemContent = (
+                        <>
+                          <div className="relative flex-shrink-0">
+                            <Avatar src={m.avatar_url} alt={m.display_name} size="sm" />
+                            <span className={cn('absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white',
+                              m.is_online || isUserOnline(m.user_id) ? 'bg-green-500' : 'bg-gray-300'
+                            )} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-dark truncate">{m.display_name}</p>
+                            <p className="text-xs text-gray-400">{m.role === 'admin' ? '👑 Admin' : 'Member'}</p>
+                          </div>
+                        </>
+                      );
+
+                      if (m.username && m.user_id !== user?.id) {
+                        return (
+                          <Link key={m.user_id} href={`/user/${m.username}`} className="flex items-center gap-2.5 px-4 py-2 hover:bg-gray-50">
+                            {itemContent}
+                          </Link>
+                        );
+                      }
+
+                      return (
+                        <div key={m.user_id} className="flex items-center gap-2.5 px-4 py-2 hover:bg-gray-50">
+                          {itemContent}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-dark truncate">{m.display_name}</p>
-                          <p className="text-xs text-gray-400">{m.role === 'admin' ? '👑 Admin' : 'Member'}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <div className="px-4 py-3 border-t border-gray-100">
+                    <button
+                      onClick={openAddMemberModal}
+                      className="w-full py-2 mb-2 text-sm text-primary-500 hover:bg-primary-50 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <UserPlus size={14} />
+                      Thêm thành viên
+                    </button>
                     <button
                       onClick={() => selected.group_id && handleLeaveGroup(selected.group_id)}
                       className="w-full py-2 text-sm text-red-500 hover:bg-red-50 rounded-xl flex items-center justify-center gap-2 transition-colors"
@@ -784,6 +948,62 @@ export default function MessagesPage() {
                 className="w-full py-2.5 bg-primary-500 text-white rounded-xl font-semibold text-sm hover:bg-primary-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 Tạo nhóm {selectedMembers.length > 0 ? `(${selectedMembers.length + 1} người)` : ''}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD MEMBER MODAL ─────────────────────────────────────────────── */}
+      {showAddMemberModal && selected?.type === 'group' && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h3 className="font-bold text-dark">Thêm thành viên</h3>
+              <button
+                onClick={() => { setShowAddMemberModal(false); setAddMemberSearch(''); }}
+                className="p-1.5 hover:bg-gray-100 rounded-lg"
+              >
+                <X size={18} className="text-gray-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={addMemberSearch}
+                  onChange={(e) => setAddMemberSearch(e.target.value)}
+                  placeholder="Tìm người dùng..."
+                  className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                />
+              </div>
+
+              <div className="max-h-64 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-50">
+                {isLoadingAddMemberPool ? (
+                  <div className="py-8 flex justify-center">
+                    <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                  </div>
+                ) : filteredAddMemberPool.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">Không còn người dùng phù hợp để thêm.</p>
+                ) : (
+                  filteredAddMemberPool.map((candidate) => (
+                    <div key={candidate.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50">
+                      <Avatar src={candidate.avatar_url} alt={candidate.display_name || candidate.username} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-dark truncate">{candidate.display_name || candidate.username}</p>
+                        <p className="text-xs text-gray-400">@{candidate.username}</p>
+                      </div>
+                      <button
+                        onClick={() => handleAddMember(candidate.id)}
+                        disabled={addingMemberId === candidate.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
+                      >
+                        {addingMemberId === candidate.id ? 'Đang thêm...' : 'Thêm'}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>

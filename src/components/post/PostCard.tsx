@@ -10,6 +10,7 @@ import type { Post } from '@/types';
 import { useAuth, useTheme } from '@/providers';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { buyPostListingOnChain } from '@/lib/nft-mint';
+import { useMarketplaceListingStatus } from '@/lib/useMarketplaceListingStatus';
 
 interface PostCardProps {
   post: Post;
@@ -43,6 +44,12 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
   const nftListingId = post.nft_listing_id || null;
   const nftStatus = post.nft_status || 'minted';
   const isListed = nftStatus === 'listed' && Boolean(nftListingId && nftPrice);
+  const { listing: liveListing, refresh: refreshListing } = useMarketplaceListingStatus(nftListingId, {
+    enabled: isListed,
+    pollingMs: 5000,
+  });
+  const isSoldOut = nftStatus === 'sold' || (isListed && !!liveListing?.isSoldOut);
+  const canBuyNft = isListed && !isSoldOut;
   const walletConnector = primaryWallet?.connector;
 
   useEffect(() => {
@@ -254,7 +261,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
   };
 
   const handleBuyNft = async () => {
-    if (!isListed || !nftListingId || !nftPrice) return;
+    if (!canBuyNft || !nftListingId || !nftPrice) return;
 
     setBuyStatus('pending');
     setBuyTxHash('');
@@ -270,7 +277,12 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
       });
       setBuyTxHash(result.txHash);
       setBuyStatus('success');
-      onUpdate?.({ ...post, nft_status: 'sold' } as Post);
+      await refreshListing();
+
+      // If listing had only one remaining item before this purchase, reflect sold state immediately.
+      if ((liveListing?.remainingQuantity ?? 1) <= 1) {
+        onUpdate?.({ ...post, nft_status: 'sold' } as Post);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to buy NFT';
       setBuyErrorMessage(message);
@@ -397,13 +409,18 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               <p className="text-xs text-gray-500">Status</p>
               <p className="font-semibold text-dark dark:text-white text-sm sm:text-base capitalize">{nftStatus}</p>
               {isListed && <p className="text-xs text-gray-500">{nftPrice} ETH</p>}
+              {isListed && liveListing && (
+                <p className="text-xs text-gray-500">
+                  Available: {liveListing.remainingQuantity}/{liveListing.quantity}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Badge variant="default" size="sm" className="text-xs">
               Base Sepolia
             </Badge>
-            {isListed ? (
+            {canBuyNft ? (
               <Button
                 size="sm"
                 variant="primary"
@@ -413,6 +430,8 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               >
                 {isBuying ? 'Buying...' : 'Buy NFT'}
               </Button>
+            ) : isListed || nftStatus === 'sold' ? (
+              <span className="text-xs font-semibold text-red-500">Sold out</span>
             ) : (
               <span className="text-xs text-gray-500">Sell in Create &gt; Sell</span>
             )}

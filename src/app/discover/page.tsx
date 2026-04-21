@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Card, Avatar, Button } from '@/components/common';
 import { Search, UserPlus, TrendingUp, Users, Loader2 } from 'lucide-react';
+import { PostCard } from '@/components/post';
 import { useTheme, useAuth } from '@/providers';
 import Link from 'next/link';
+import type { Post } from '@/types';
 
 interface DiscoverUser {
   id: string;
@@ -18,21 +20,6 @@ interface DiscoverUser {
   is_following?: boolean;
 }
 
-interface DiscoverPost {
-  id: string;
-  caption: string | null;
-  created_at: string;
-  likes_count: number;
-  comments_count: number;
-  reposts_count: number;
-  user?: {
-    username?: string;
-    display_name?: string | null;
-  } | null;
-}
-
-const trendingTags = ['#NFT', '#BaseSepolia', '#DigitalArt', '#Web3', '#Crypto', '#Photography'];
-
 export default function DiscoverPage() {
   const router = useRouter();
   const { t } = useTheme();
@@ -40,9 +27,8 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'trending'>('users');
   const [users, setUsers] = useState<DiscoverUser[]>([]);
-  const [trendingPosts, setTrendingPosts] = useState<DiscoverPost[]>([]);
+  const [trendingPosts, setTrendingPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isOpeningPostId, setIsOpeningPostId] = useState<string | null>(null);
   const [hasSearchedUsers, setHasSearchedUsers] = useState(false);
   const [hasSearchedTrending, setHasSearchedTrending] = useState(false);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
@@ -171,19 +157,8 @@ export default function DiscoverPage() {
     }
   };
 
-  const handleOpenTrendingPost = async (postId: string) => {
-    try {
-      setIsOpeningPostId(postId);
-
-      await fetch(`/api/posts/${postId}?noCache=true`, {
-        cache: 'no-store',
-      });
-    } catch (error) {
-      console.log('Error preloading post detail:', error);
-    } finally {
-      setIsOpeningPostId(null);
-      router.push(`/post/${postId}`);
-    }
+  const handleTrendingPostUpdate = (updatedPost: Post) => {
+    setTrendingPosts((prev) => prev.map((item) => (item.id === updatedPost.id ? updatedPost : item)));
   };
 
   return (
@@ -294,39 +269,14 @@ export default function DiscoverPage() {
                   <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
                 </div>
               ) : trendingPosts.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-4">
                   {trendingPosts.map((post) => (
-                    <button
+                    <PostCard
                       key={post.id}
-                      type="button"
-                      onClick={() => handleOpenTrendingPost(post.id)}
-                      disabled={isOpeningPostId === post.id}
-                      className="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-primary-300 hover:bg-primary-50/40 dark:hover:bg-gray-800 transition-colors disabled:opacity-70"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-dark dark:text-white break-words">
-                            {post.caption}
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            @{post.user?.username || 'unknown'}
-                            {post.user?.display_name ? ` - ${post.user.display_name}` : ''}
-                          </p>
-                          <div className="flex items-center gap-3 text-xs text-gray-400 mt-2">
-                            <span>{post.likes_count || 0} likes</span>
-                            <span>{post.comments_count || 0} comments</span>
-                            <span>{post.reposts_count || 0} reposts</span>
-                          </div>
-                        </div>
-                        <div className="pt-1 text-primary-500">
-                          {isOpeningPostId === post.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <span className="text-xs font-semibold">Open</span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                      post={post}
+                      onComment={() => router.push(`/post/${post.id}`)}
+                      onUpdate={handleTrendingPostUpdate}
+                    />
                   ))}
                 </div>
               ) : (
@@ -334,21 +284,6 @@ export default function DiscoverPage() {
                   No posts found with this caption text.
                 </p>
               )}
-            </Card>
-
-            <Card>
-              <h3 className="font-semibold text-dark dark:text-white mb-4">{t('trendingTags')}</h3>
-              <div className="flex flex-wrap gap-2">
-                {trendingTags.map((tag) => (
-                  <Link
-                    key={tag}
-                    href={`/search?q=${encodeURIComponent(tag)}`}
-                    className="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-primary-50 dark:hover:bg-primary-900 hover:text-primary-500 dark:text-gray-300 rounded-full text-sm font-medium transition-colors"
-                  >
-                    {tag}
-                  </Link>
-                ))}
-              </div>
             </Card>
 
             <Card>
