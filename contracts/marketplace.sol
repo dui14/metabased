@@ -11,6 +11,13 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 	address payable public constant DEV_WALLET = payable(0x7aDD236f981D2Dbc7261C226DeBe8914c96b8CdE);
 
+	enum ListingStatus {
+		Active,
+		SoldOut,
+		Cancelled,
+		Expired
+	}
+
 	struct Listing {
 		uint256 id;
 		address seller;
@@ -21,6 +28,8 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 		uint256 pricePerItem;
 		bool isErc1155;
 		bool isActive;
+		uint256 expiresAt;
+		ListingStatus status;
 	}
 
 	uint256 public listingCounter;
@@ -38,6 +47,7 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 		bool isErc1155
 	);
 	event ListingCancelled(uint256 indexed listingId, address indexed seller);
+	event ListingExpired(uint256 indexed listingId, address indexed seller);
 	event ListingPurchased(
 		uint256 indexed listingId,
 		address indexed buyer,
@@ -49,12 +59,15 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 
 	error ListingNotFound();
 	error ListingInactive();
+	error ListingHasExpired();
+	error ListingNotExpired();
 	error InvalidPrice();
 	error InvalidQuantity();
 	error NotSeller();
 	error InvalidPayment();
 	error TransferFailed();
 	error FeeTooHigh();
+	error InvalidExpiry();
 
 	constructor(uint96 initialPlatformFeeBps) Ownable(msg.sender) {
 		if (initialPlatformFeeBps > 1000) {
@@ -77,10 +90,15 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 		uint256 tokenId,
 		uint256 quantity,
 		uint256 pricePerItem,
-		bool isErc1155
+		bool isErc1155,
+		uint256 expiresAt
 	) external returns (uint256 listingId) {
 		if (pricePerItem == 0) {
 			revert InvalidPrice();
+		}
+
+		if (expiresAt != 0 && expiresAt <= block.timestamp) {
+			revert InvalidExpiry();
 		}
 
 		if (isErc1155) {
@@ -105,10 +123,28 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 			remainingQuantity: quantity,
 			pricePerItem: pricePerItem,
 			isErc1155: isErc1155,
-			isActive: true
+			isActive: true,
+			expiresAt: expiresAt,
+			status: ListingStatus.Active
 		});
 
 		emit ListingCreated(listingId, msg.sender, nftContract, tokenId, quantity, pricePerItem, isErc1155);
+	}
+
+	function expireListing(uint256 listingId) external {
+		Listing storage listing = listings[listingId];
+		if (listing.id == 0) {
+			revert ListingNotFound();
+		}
+		if (!listing.isActive) {
+			revert ListingInactive();
+		}
+		if (listing.expiresAt == 0 || listing.expiresAt > block.timestamp) {
+			revert ListingNotExpired();
+		}
+
+		_closeListingWithReturn(listing, ListingStatus.Expired);
+		emit ListingExpired(listingId, listing.seller);
 	}
 
 	function cancelListing(uint256 listingId) external {
@@ -123,15 +159,13 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 			revert NotSeller();
 		}
 
-		listing.isActive = false;
-		uint256 remaining = listing.remainingQuantity;
-		listing.remainingQuantity = 0;
-
-		if (listing.isErc1155) {
-			IERC1155(listing.nftContract).safeTransferFrom(address(this), listing.seller, listing.tokenId, remaining, "");
-		} else {
-			IERC721(listing.nftContract).safeTransferFrom(address(this), listing.seller, listing.tokenId);
+		if (listing.expiresAt != 0 && listing.expiresAt <= block.timestamp) {
+			_closeListingWithReturn(listing, ListingStatus.Expired);
+			emit ListingExpired(listingId, listing.seller);
+			return;
 		}
+
+		_closeListingWithReturn(listing, ListingStatus.Cancelled);
 
 		emit ListingCancelled(listingId, msg.sender);
 	}
@@ -143,6 +177,9 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 		}
 		if (!listing.isActive) {
 			revert ListingInactive();
+		}
+		if (listing.expiresAt != 0 && listing.expiresAt <= block.timestamp) {
+			revert ListingHasExpired();
 		}
 
 		uint256 buyQuantity = quantity;
@@ -167,6 +204,7 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 		listing.remainingQuantity -= buyQuantity;
 		if (listing.remainingQuantity == 0) {
 			listing.isActive = false;
+			listing.status = ListingStatus.SoldOut;
 		}
 
 		(bool sent, ) = payable(listing.seller).call{value: sellerAmount}("");
@@ -188,5 +226,20 @@ contract Marketplace is Ownable, ERC721Holder, ERC1155Holder, ReentrancyGuard {
 		}
 
 		emit ListingPurchased(listingId, msg.sender, buyQuantity, totalPrice, feeAmount);
+	}
+
+	function _closeListingWithReturn(Listing storage listing, ListingStatus nextStatus) private {
+		listing.isActive = false;
+		listing.status = nextStatus;
+		uint256 remaining = listing.remainingQuantity;
+		listing.remainingQuantity = 0;
+		if (remaining == 0) {
+			return;
+		}
+		if (listing.isErc1155) {
+			IERC1155(listing.nftContract).safeTransferFrom(address(this), listing.seller, listing.tokenId, remaining, "");
+		} else {
+			IERC721(listing.nftContract).safeTransferFrom(address(this), listing.seller, listing.tokenId);
+		}
 	}
 }
