@@ -8,6 +8,10 @@ export interface MarketplaceListingStatus {
   remainingQuantity: number;
   isActive: boolean;
   isSoldOut: boolean;
+  isCancelled: boolean;
+  isExpired: boolean;
+  status: 'active' | 'sold_out' | 'cancelled' | 'expired' | 'unknown';
+  expiresAt: number;
 }
 
 interface UseMarketplaceListingStatusOptions {
@@ -45,6 +49,9 @@ export function useMarketplaceListingStatus(
                   remainingQuantity: 0,
                   isActive: false,
                   isSoldOut: true,
+                  isCancelled: false,
+                  isExpired: false,
+                  status: 'unknown',
                 }
               : null
           );
@@ -56,12 +63,17 @@ export function useMarketplaceListingStatus(
       const next = data.listing;
       if (!next) return;
 
+      const nextStatus = typeof next.status === 'string' ? next.status : 'unknown';
       setListing({
         id: String(next.id),
         quantity: typeof next.quantity === 'number' ? next.quantity : 0,
         remainingQuantity: typeof next.remaining_quantity === 'number' ? next.remaining_quantity : 0,
         isActive: !!next.is_active,
         isSoldOut: !!next.is_sold_out,
+        isCancelled: !!next.is_cancelled,
+        isExpired: !!next.is_expired,
+        status: nextStatus,
+        expiresAt: typeof next.expires_at === 'number' ? next.expires_at : 0,
       });
     } catch {
       // Ignore transient polling errors.
@@ -78,6 +90,12 @@ export function useMarketplaceListingStatus(
 
     void refresh();
 
+    const shouldPoll = (listing?.isActive ?? true) && enabled && Boolean(listingId);
+
+    if (!shouldPoll) {
+      return undefined;
+    }
+
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         void refresh();
@@ -87,7 +105,7 @@ export function useMarketplaceListingStatus(
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [enabled, listingId, pollingMs, refresh]);
+  }, [enabled, listingId, pollingMs, refresh, listing?.isActive]);
 
   return useMemo(
     () => ({ listing, isLoading, refresh }),

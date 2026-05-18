@@ -69,6 +69,7 @@ interface SellPostOnChainParams {
   tokenId: string;
   priceEth: string;
   amount?: number;
+  expiresAt?: string | null;
   walletConnector?: unknown;
 }
 
@@ -95,6 +96,19 @@ interface PersistPostListingResponse {
   contract_type?: MintContractType;
 }
 
+interface PersistPostListingCancelParams {
+  postId: string;
+  listingId: string;
+  cancelTxHash?: string | null;
+  reason?: 'cancelled' | 'expired' | null;
+}
+
+interface PersistPostListingCancelResponse {
+  post: Record<string, unknown>;
+  cancel_tx_hash?: string;
+  listing_id?: string;
+}
+
 const ERC721_ABI = [
   'function mint(address to, string tokenURI, uint256 mintDeadline) payable',
   'function mintFeeWei() view returns (uint256)',
@@ -116,7 +130,9 @@ const ERC1155_ABI = [
 ];
 
 const MARKETPLACE_ABI = [
-  'function createListing(address nftContract, uint256 tokenId, uint256 quantity, uint256 pricePerItem, bool isErc1155) returns (uint256 listingId)',
+  'function createListing(address nftContract, uint256 tokenId, uint256 quantity, uint256 pricePerItem, bool isErc1155, uint256 expiresAt) returns (uint256 listingId)',
+  'function cancelListing(uint256 listingId)',
+  'function expireListing(uint256 listingId)',
   'function buyListing(uint256 listingId, uint256 quantity) payable',
   'event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed nftContract, uint256 tokenId, uint256 quantity, uint256 pricePerItem, bool isErc1155)',
 ];
@@ -283,6 +299,26 @@ function parseMintDeadline(mintDeadline?: string | null): bigint {
 
   if (timestamp <= now) {
     throw new Error('Mint deadline must be in the future');
+  }
+
+  return BigInt(timestamp);
+}
+
+function parseListingExpiry(expiresAt?: string | null): bigint {
+  if (!expiresAt) {
+    return BigInt(0);
+  }
+
+  const parsed = Date.parse(expiresAt);
+  if (Number.isNaN(parsed)) {
+    throw new Error('Invalid listing expiry time');
+  }
+
+  const timestamp = Math.floor(parsed / 1000);
+  const now = Math.floor(Date.now() / 1000);
+
+  if (timestamp <= now) {
+    throw new Error('Listing expiry must be in the future');
   }
 
   return BigInt(timestamp);
@@ -476,6 +512,7 @@ export async function sellPostOnChain({
   tokenId,
   priceEth,
   amount = 1,
+  expiresAt = null,
   walletConnector,
 }: SellPostOnChainParams): Promise<SellPostOnChainResult> {
   if (typeof window === 'undefined') {
@@ -485,6 +522,7 @@ export async function sellPostOnChain({
   const marketplaceAddress = getMarketplaceAddress();
   const listingPriceWei = parsePriceToWei(priceEth);
   const parsedTokenId = BigInt(tokenId);
+  const expiresAtEpoch = parseListingExpiry(expiresAt);
   const { signer } = await getProviderAndSigner(walletConnector);
 
   let approvalTxHash = '';
@@ -523,7 +561,8 @@ export async function sellPostOnChain({
       parsedTokenId,
       quantityForListing,
       listingPriceWei,
-      contractType === 'ERC1155'
+      contractType === 'ERC1155',
+      expiresAtEpoch
     );
 
     const listingReceipt = await listingTx.wait();
@@ -582,6 +621,95 @@ export async function persistPostListing({
 
   if (!response.ok) {
     throw new Error(data.error || 'Failed to persist post listing data');
+  }
+
+  return data;
+}
+
+export async function cancelPostListingOnChain({
+  listingId,
+  walletConnector,
+}: {
+  listingId: string;
+  walletConnector?: unknown;
+}): Promise<{ txHash: string }> {
+  if (typeof window === 'undefined') {
+    throw new Error('Cancel listing is only available in browser context');
+  }
+
+  const marketplaceAddress = getMarketplaceAddress();
+  const { signer } = await getProviderAndSigner(walletConnector);
+  const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, signer);
+
+  try {
+    const tx = await marketplace.cancelListing(BigInt(listingId));
+    const receipt = await tx.wait();
+    if (!receipt) {
+      throw new Error('Cancel transaction did not return a receipt');
+    }
+    return { txHash: receipt.hash };
+  } catch (error) {
+    throw new Error(`Failed to cancel listing: ${getReadableError(error)}`);
+  }
+}
+
+export async function expirePostListingOnChain({
+  listingId,
+  walletConnector,
+}: {
+  listingId: string;
+  walletConnector?: unknown;
+}): Promise<{ txHash: string }> {
+  if (typeof window === 'undefined') {
+    throw new Error('Expire listing is only available in browser context');
+  }
+
+  const marketplaceAddress = getMarketplaceAddress();
+  const { signer } = await getProviderAndSigner(walletConnector);
+  const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, signer);
+
+  try {
+    const tx = await marketplace.expireListing(BigInt(listingId));
+    const receipt = await tx.wait();
+    if (!receipt) {
+      throw new Error('Expire transaction did not return a receipt');
+    }
+    return { txHash: receipt.hash };
+  } catch (error) {
+    throw new Error(`Failed to expire listing: ${getReadableError(error)}`);
+  }
+}
+
+export async function persistPostListingCancel({
+  postId,
+  listingId,
+  cancelTxHash = null,
+  reason = null,
+}: PersistPostListingCancelParams): Promise<PersistPostListingCancelResponse> {
+  const token = await resolveAuthToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`/api/posts/${postId}/listing/cancel`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({
+      listing_id: listingId,
+      cancel_tx_hash: cancelTxHash,
+      reason,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to persist listing cancel data');
   }
 
   return data;
