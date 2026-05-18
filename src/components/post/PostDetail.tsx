@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers';
-import { buyPostListingOnChain } from '@/lib/nft-mint';
+import { buyPostListingOnChain, cancelPostListingOnChain, expirePostListingOnChain, persistPostListingCancel } from '@/lib/nft-mint';
 import { formatTokenIdShort, resolveNftPreview } from '@/lib/nft-preview';
 import { useMarketplaceListingStatus } from '@/lib/useMarketplaceListingStatus';
 import type { Post, Comment } from '@/types';
@@ -42,17 +42,34 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [nftPreviewImage, setNftPreviewImage] = useState<string | null>(null);
   const [nftTokenUri, setNftTokenUri] = useState<string | null>(null);
+  const [unsellStatus, setUnsellStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [unsellErrorMessage, setUnsellErrorMessage] = useState('');
+  const [unsellTxHash, setUnsellTxHash] = useState('');
 
   const nftStatus = post.nft_status || 'minted';
   const nftPrice = post.nft_price?.trim() || null;
   const nftListingId = post.nft_listing_id || null;
   const isListed = nftStatus === 'listed' && Boolean(nftListingId && nftPrice);
+  const shouldTrackListing = Boolean(nftListingId);
   const { listing: liveListing, refresh: refreshListing } = useMarketplaceListingStatus(nftListingId, {
-    enabled: isListed,
+    enabled: shouldTrackListing,
     pollingMs: 5000,
   });
-  const isSoldOut = nftStatus === 'sold' || (isListed && !!liveListing?.isSoldOut);
-  const canBuyNft = isListed && !isSoldOut;
+  const isOwner = user?.id === post.user_id;
+  const isListingCancelled = !!liveListing?.isCancelled;
+  const isListingExpired = !!liveListing?.isExpired;
+  const isListingSoldOut = nftStatus === 'sold' || !!liveListing?.isSoldOut;
+  const isOnChainActive = liveListing?.isActive ?? true;
+  const canBuyNft = isListed && isOnChainActive && !isListingSoldOut && !isListingCancelled && !isListingExpired;
+  const canUnsell = isOwner && isListed && isOnChainActive && !isListingSoldOut && !isListingCancelled && !isListingExpired;
+  const canExpire = isOwner && isListed && isOnChainActive && isListingExpired && !isListingCancelled && !isListingSoldOut;
+  const displayStatus = isListingCancelled
+    ? 'cancelled'
+    : isListingExpired
+      ? 'expired'
+      : isListingSoldOut
+        ? 'sold'
+        : nftStatus;
   const nftDisplayImage = post.image_url || nftPreviewImage;
   const nftActionTime = nftStatus === 'listed' ? post.updated_at : post.created_at;
   const walletConnector = primaryWallet?.connector;
@@ -288,9 +305,40 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
         onUpdate?.({ ...post, nft_status: 'sold' } as Post);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to buy NFT';
-      setBuyErrorMessage(message);
+      console.error('Buy NFT failed:', error);
+      setBuyErrorMessage('Giao dịch không thành công');
       setBuyStatus('error');
+    }
+  };
+
+  const handleUnsell = async () => {
+    if (!nftListingId || !isOwner) return;
+
+    setUnsellStatus('pending');
+    setUnsellErrorMessage('');
+    setUnsellTxHash('');
+
+    try {
+      const result = canExpire
+        ? await expirePostListingOnChain({ listingId: nftListingId, walletConnector })
+        : await cancelPostListingOnChain({ listingId: nftListingId, walletConnector });
+
+      setUnsellTxHash(result.txHash);
+
+      const persisted = await persistPostListingCancel({
+        postId: post.id,
+        listingId: nftListingId,
+        cancelTxHash: result.txHash,
+        reason: canExpire ? 'expired' : 'cancelled',
+      });
+
+      onUpdate?.(persisted.post as unknown as Post);
+      await refreshListing();
+      setUnsellStatus('success');
+    } catch (error) {
+      console.error('Unsell failed:', error);
+      setUnsellErrorMessage('Giao dịch không thành công');
+      setUnsellStatus('error');
     }
   };
 
@@ -331,6 +379,7 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
               src={nftDisplayImage}
               alt={post.caption || 'Post image'}
               fill
+              sizes="(max-width: 768px) 100vw, 672px"
               className="object-cover"
               priority
               unoptimized
@@ -347,7 +396,7 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
         )}
 
         {/* Timestamp */}
-        <p className="text-sm text-gray-400 mt-3">
+        <p className="text-sm text-gray-400 mt-3" suppressHydrationWarning>
           {new Date(post.created_at).toLocaleString('en-US', {
             month: 'short',
             day: 'numeric',
@@ -445,7 +494,7 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
             )}
             <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span className="text-gray-500">Time</span>
-              <span className="text-dark dark:text-white">{new Date(nftActionTime).toLocaleString('vi-VN')}</span>
+              <span className="text-dark dark:text-white" suppressHydrationWarning>{new Date(nftActionTime).toLocaleString('vi-VN')}</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span className="text-gray-500">Token URI</span>
@@ -464,43 +513,80 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
             </div>
             <div className="flex justify-between items-center py-2">
               <span className="text-gray-500">Status</span>
-              <Badge variant={isListed ? 'success' : 'default'} size="sm">{nftStatus}</Badge>
+              <Badge variant={displayStatus === 'listed' ? 'success' : 'default'} size="sm">{displayStatus}</Badge>
             </div>
           </div>
 
           <div className="flex items-center justify-between p-4 bg-gradient-to-r from-primary-50 to-orange-50 dark:from-primary-900/30 dark:to-orange-900/30 rounded-xl">
             <div>
               <p className="text-sm text-gray-500">Current Price</p>
-              <p className="text-2xl font-bold text-dark dark:text-white">{nftPrice ? `${nftPrice} ETH` : '-'}</p>
+              <p className="text-2xl font-bold text-dark dark:text-white">{isListed && nftPrice ? `${nftPrice} ETH` : '-'}</p>
               <p className="text-xs text-gray-400">Listing ID: {nftListingId || '-'}</p>
             </div>
-            {canBuyNft ? (
-              <Button
-                variant="primary"
-                size="lg"
-                className="px-8"
-                onClick={handleBuyNft}
-                disabled={buyStatus === 'pending' || buyStatus === 'confirming'}
-              >
-                {(buyStatus === 'pending' || buyStatus === 'confirming') ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 size={16} className="animate-spin" />
-                    Buying...
-                  </span>
-                ) : 'Buy NFT'}
-              </Button>
-            ) : isListed || nftStatus === 'sold' ? (
-              <Badge variant="default" size="sm">Sold out</Badge>
-            ) : (
-              <Badge variant="default" size="sm">Sell in Create &gt; Sell</Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {canUnsell && (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="px-6"
+                  onClick={handleUnsell}
+                  disabled={unsellStatus === 'pending'}
+                >
+                  {unsellStatus === 'pending' ? 'Unselling...' : 'Unsell'}
+                </Button>
+              )}
+              {canExpire && (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="px-6"
+                  onClick={handleUnsell}
+                  disabled={unsellStatus === 'pending'}
+                >
+                  {unsellStatus === 'pending' ? 'Returning...' : 'Return NFT'}
+                </Button>
+              )}
+              {canBuyNft ? (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="px-8"
+                  onClick={handleBuyNft}
+                  disabled={buyStatus === 'pending' || buyStatus === 'confirming'}
+                >
+                  {(buyStatus === 'pending' || buyStatus === 'confirming') ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 size={16} className="animate-spin" />
+                      Buying...
+                    </span>
+                  ) : 'Buy NFT'}
+                </Button>
+              ) : isListingCancelled ? (
+                <Badge variant="default" size="sm">Listing cancelled</Badge>
+              ) : isListingExpired ? (
+                <Badge variant="default" size="sm">Listing expired</Badge>
+              ) : isListingSoldOut ? (
+                <Badge variant="default" size="sm">Sold out</Badge>
+              ) : isListed ? (
+                <Badge variant="default" size="sm">Not available</Badge>
+              ) : (
+                <Badge variant="default" size="sm">Sell in Create &gt; Sell</Badge>
+              )}
+            </div>
           </div>
+
+          {unsellStatus === 'error' && unsellErrorMessage && (
+            <p className="mt-2 text-xs text-red-500">{unsellErrorMessage}</p>
+          )}
+          {unsellStatus === 'success' && unsellTxHash && (
+            <p className="mt-2 text-xs text-green-600">Unsell tx: {unsellTxHash.slice(0, 10)}...{unsellTxHash.slice(-6)}</p>
+          )}
 
           <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
             <p className="text-xs text-gray-500 mb-1">Transaction History</p>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse-soft" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">{`${nftStatus} at ${new Date(nftActionTime).toLocaleString('vi-VN')}`}</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400" suppressHydrationWarning>{`${nftStatus} at ${new Date(nftActionTime).toLocaleString('vi-VN')}`}</span>
             </div>
           </div>
         </Card>
@@ -545,7 +631,7 @@ const PostDetail = ({ post, comments = [], onCommentAdded, onUpdate, onDelete }:
               </div>
             )}
             <Button variant="primary" className="w-full" onClick={closeBuyModal}>
-              Done
+              Close
             </Button>
           </div>
         )}

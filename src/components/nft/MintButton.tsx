@@ -58,7 +58,8 @@ const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, on
       setStatus('success');
       onMintSuccess?.(persisted.post);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Unknown minting error');
+      console.error('Mint NFT failed:', error);
+      setErrorMessage('Giao dịch không thành công');
       setStatus('error');
     }
   };
@@ -109,7 +110,7 @@ const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, on
           <div className="space-y-6">
             <div className="p-4 bg-gradient-to-r from-primary-50 to-orange-50 rounded-xl">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-soft">
+                <div className="size-12 bg-white rounded-xl flex items-center justify-center shadow-soft">
                   <Sparkles size={24} className="text-primary-500" />
                 </div>
                 <div>
@@ -120,7 +121,7 @@ const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, on
             </div>
 
             <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700">Choose NFT standard</label>
+              <p className="block text-sm font-medium text-gray-700">Choose NFT standard</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
@@ -168,10 +169,11 @@ const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, on
 
             {contractType === 'ERC1155' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="mint-erc1155-amount" className="block text-sm font-medium text-gray-700 mb-2">
                   Amount (ERC-1155)
                 </label>
                 <input
+                  id="mint-erc1155-amount"
                   type="number"
                   value={amount1155}
                   onChange={(e) => setAmount1155(e.target.value)}
@@ -210,7 +212,7 @@ const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, on
 
         {status === 'success' && (
           <div className="text-center py-8">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="size-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Check size={32} className="text-green-500" />
             </div>
             <h4 className="text-lg font-semibold text-dark mb-2">NFT Minted!</h4>
@@ -234,7 +236,7 @@ const MintButton = ({ postId, tokenURI = null, mintDeadline = null, disabled, on
 
         {status === 'error' && (
           <div className="text-center py-8">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="size-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={32} className="text-red-500" />
             </div>
             <h4 className="text-lg font-semibold text-dark mb-2">Transaction Failed</h4>

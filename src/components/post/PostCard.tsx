@@ -44,12 +44,23 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
   const nftListingId = post.nft_listing_id || null;
   const nftStatus = post.nft_status || 'minted';
   const isListed = nftStatus === 'listed' && Boolean(nftListingId && nftPrice);
+  const shouldTrackListing = Boolean(nftListingId);
   const { listing: liveListing, refresh: refreshListing } = useMarketplaceListingStatus(nftListingId, {
-    enabled: isListed,
+    enabled: shouldTrackListing,
     pollingMs: 5000,
   });
-  const isSoldOut = nftStatus === 'sold' || (isListed && !!liveListing?.isSoldOut);
-  const canBuyNft = isListed && !isSoldOut;
+  const isListingCancelled = !!liveListing?.isCancelled;
+  const isListingExpired = !!liveListing?.isExpired;
+  const isListingSoldOut = nftStatus === 'sold' || !!liveListing?.isSoldOut;
+  const isOnChainActive = liveListing?.isActive ?? true;
+  const canBuyNft = isListed && isOnChainActive && !isListingSoldOut && !isListingCancelled && !isListingExpired;
+  const displayStatus = isListingCancelled
+    ? 'cancelled'
+    : isListingExpired
+      ? 'expired'
+      : isListingSoldOut
+        ? 'sold'
+        : nftStatus;
   const walletConnector = primaryWallet?.connector;
 
   useEffect(() => {
@@ -284,8 +295,8 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
         onUpdate?.({ ...post, nft_status: 'sold' } as Post);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to buy NFT';
-      setBuyErrorMessage(message);
+      console.error('Buy NFT failed:', error);
+      setBuyErrorMessage('Giao dịch không thành công');
       setBuyStatus('error');
     } finally {
       setIsBuying(false);
@@ -383,6 +394,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               src={post.image_url}
               alt={post.caption || 'Post image'}
               fill
+              sizes="(max-width: 768px) 100vw, 672px"
               className="object-cover hover:scale-105 transition-transform duration-300"
               unoptimized
             />
@@ -402,12 +414,12 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
       {isNft && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-gradient-to-r from-primary-50 to-orange-50 dark:from-primary-900/30 dark:to-orange-900/30 rounded-xl mb-3">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center shadow-soft flex-shrink-0">
+            <div className="size-8 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center shadow-soft flex-shrink-0">
               <Sparkles size={16} className="text-primary-500" />
             </div>
             <div>
               <p className="text-xs text-gray-500">Status</p>
-              <p className="font-semibold text-dark dark:text-white text-sm sm:text-base capitalize">{nftStatus}</p>
+              <p className="font-semibold text-dark dark:text-white text-sm sm:text-base capitalize">{displayStatus}</p>
               {isListed && <p className="text-xs text-gray-500">{nftPrice} ETH</p>}
               {isListed && liveListing && (
                 <p className="text-xs text-gray-500">
@@ -430,8 +442,14 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               >
                 {isBuying ? 'Buying...' : 'Buy NFT'}
               </Button>
-            ) : isListed || nftStatus === 'sold' ? (
+            ) : isListingCancelled ? (
+              <span className="text-xs font-semibold text-gray-500">Listing cancelled</span>
+            ) : isListingExpired ? (
+              <span className="text-xs font-semibold text-gray-500">Listing expired</span>
+            ) : isListingSoldOut ? (
               <span className="text-xs font-semibold text-red-500">Sold out</span>
+            ) : isListed ? (
+              <span className="text-xs font-semibold text-gray-500">Not available</span>
             ) : (
               <span className="text-xs text-gray-500">Sell in Create &gt; Sell</span>
             )}
@@ -520,7 +538,7 @@ const PostCard = ({ post, onLike, onComment, onRepost, onShare, onUpdate, onDele
               </a>
             </div>
           )}
-          <Button variant="primary" className="w-full" onClick={closeBuyModal}>Done</Button>
+          <Button variant="primary" className="w-full" onClick={closeBuyModal}>Close</Button>
         </div>
       )}
       {buyStatus === 'error' && (
