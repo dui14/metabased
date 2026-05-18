@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { MainLayout } from '@/components/layout';
 import { Card, Button, Avatar, Badge } from '@/components/common';
 import { Sparkles, X, Upload, ArrowLeft, Loader2, HelpCircle } from 'lucide-react';
@@ -37,7 +38,7 @@ function getWalletNftOptionId(item: WalletOwnedNft): string {
 }
 
 export default function CreatePostPage() {
-  const router = useRouter();
+  const { push, refresh, back } = useRouter();
   const { user } = useAuth();
   const { primaryWallet } = useDynamicContext();
   const { t } = useTheme();
@@ -59,6 +60,7 @@ export default function CreatePostPage() {
   const [isScanningWalletNfts, setIsScanningWalletNfts] = useState(false);
   const [walletNftsError, setWalletNftsError] = useState<string | null>(null);
   const [nftMintExpiresAt, setNftMintExpiresAt] = useState(getDefaultMintExpiryLocalValue());
+  const [sellExpiresAt, setSellExpiresAt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const walletConnector = primaryWallet?.connector;
@@ -250,10 +252,12 @@ export default function CreatePostPage() {
       }
     }
 
+    const shouldDelayPublish = mintAsNFT && nftActionMode === 'sell';
     setIsLoading(true);
     setError(null);
 
     let createdPostId: string | null = null;
+    let hasOnChainListing = false;
 
     try {
       let imageUrl = '';
@@ -275,7 +279,7 @@ export default function CreatePostPage() {
         body: JSON.stringify({
           image_url: imageUrl || null,
           caption: caption.trim() || null,
-          visibility: 'public',
+          visibility: shouldDelayPublish ? 'private' : 'public',
           nft_mint_expires_at:
             mintAsNFT && nftActionMode === 'mint' && nftMintExpiresAt
               ? new Date(nftMintExpiresAt).toISOString()
@@ -327,8 +331,11 @@ export default function CreatePostPage() {
             tokenId: selected.tokenId,
             priceEth: normalizedPrice,
             amount: amountToSell,
+            expiresAt: sellExpiresAt.trim() ? sellExpiresAt : null,
             walletConnector,
           });
+
+          hasOnChainListing = true;
 
           await persistMintedPost({
             postId: newPostId,
@@ -343,16 +350,42 @@ export default function CreatePostPage() {
         }
       }
 
-      router.push(`/post/${newPostId}?noCache=true`);
-      router.refresh();
+      if (shouldDelayPublish) {
+        const publishResponse = await fetch(`/api/posts/${newPostId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ visibility: 'public' }),
+        });
+
+        const publishData = await publishResponse.json();
+        if (!publishResponse.ok) {
+          throw new Error(publishData.error || 'Failed to publish post');
+        }
+      }
+
+      push(`/post/${newPostId}?noCache=true`);
+      refresh();
     } catch (err) {
       console.error('Error creating post/mint:', err);
       const message = err instanceof Error ? err.message : 'An error occurred';
 
-      if (createdPostId) {
+      if (createdPostId && shouldDelayPublish && !hasOnChainListing) {
+        try {
+          await fetch(`/api/posts/${createdPostId}`, {
+            method: 'DELETE',
+            credentials: 'include',
+          });
+        } catch {
+        }
+
+        setError(`Giao dich that bai: ${message}. Bai dang chua duoc tao.`);
+      } else if (createdPostId && shouldDelayPublish && hasOnChainListing) {
+        setError(`Da tao listing nhung luu bai that bai: ${message}`);
+      } else if (createdPostId) {
         setError(`Post was created but mint failed: ${message}`);
-        router.push(`/post/${createdPostId}?noCache=true`);
-        router.refresh();
+        push(`/post/${createdPostId}?noCache=true`);
+        refresh();
       } else {
         setError(message);
       }
@@ -368,7 +401,7 @@ export default function CreatePostPage() {
         <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
             <button
-              onClick={() => router.back()}
+              onClick={() => back()}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors flex-shrink-0"
             >
               <ArrowLeft size={18} className="sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
@@ -405,6 +438,7 @@ export default function CreatePostPage() {
             <Avatar src={user?.avatar_url} alt={user?.display_name || 'You'} size="md" className="flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <textarea
+                id="post-caption"
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 placeholder={t('whatsOnYourMind')}
@@ -427,10 +461,14 @@ export default function CreatePostPage() {
           
           {selectedImage ? (
             <div className="relative">
-              <img
+              <Image
                 src={selectedImage}
                 alt="Selected"
+                width={1200}
+                height={1200}
+                sizes="(max-width: 768px) 100vw, 672px"
                 className="w-full aspect-square object-cover rounded-xl"
+                unoptimized
               />
               <button
                 onClick={() => {
@@ -522,9 +560,9 @@ export default function CreatePostPage() {
               {nftActionMode === 'mint' ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <p className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       NFT Standard
-                    </label>
+                    </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
@@ -572,12 +610,13 @@ export default function CreatePostPage() {
 
                   {nftContractType === 'ERC1155' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Amount (ERC-1155)
-                      </label>
-                      <input
-                        type="number"
-                        value={nft1155Supply}
+                    <label htmlFor="nft1155-supply" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Amount (ERC-1155)
+                    </label>
+                    <input
+                      id="nft1155-supply"
+                      type="number"
+                      value={nft1155Supply}
                         onChange={(e) => setNft1155Supply(e.target.value)}
                         step="1"
                         min="1"
@@ -587,10 +626,11 @@ export default function CreatePostPage() {
                   )}
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label htmlFor="mint-expiry-time" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Mint Expiry Time
                     </label>
                     <input
+                      id="mint-expiry-time"
                       type="datetime-local"
                       value={nftMintExpiresAt}
                       onChange={(e) => setNftMintExpiresAt(e.target.value)}
@@ -707,11 +747,12 @@ export default function CreatePostPage() {
 
                   {selectedWalletNft && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Amount to Sell
-                      </label>
-                      <input
-                        type="number"
+                    <label htmlFor="sell-amount" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Amount to Sell
+                    </label>
+                    <input
+                      id="sell-amount"
+                      type="number"
                         value={sellAmount}
                         onChange={(e) => setSellAmount(e.target.value)}
                         step="1"
@@ -729,10 +770,11 @@ export default function CreatePostPage() {
                   )}
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label htmlFor="sell-price" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Sell Price (ETH)
                     </label>
                     <input
+                      id="sell-price"
                       type="number"
                       value={sellPrice}
                       onChange={(e) => setSellPrice(e.target.value)}
@@ -740,6 +782,21 @@ export default function CreatePostPage() {
                       min="0"
                       className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-400 text-dark dark:text-white"
                     />
+                  </div>
+
+                  <div>
+                    <label htmlFor="sell-expiry-time" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Listing Expiry Time (optional)
+                    </label>
+                    <input
+                      id="sell-expiry-time"
+                      type="datetime-local"
+                      value={sellExpiresAt}
+                      onChange={(e) => setSellExpiresAt(e.target.value)}
+                      min={new Date().toISOString().slice(0, 16)}
+                      className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-400 text-dark dark:text-white"
+                    />
+                    <p className="mt-2 text-xs text-gray-400">Leave empty for no expiry</p>
                   </div>
                 </>
               )}
@@ -763,7 +820,7 @@ export default function CreatePostPage() {
           <Button 
             variant="outline" 
             className="flex-1"
-            onClick={() => router.back()}
+            onClick={() => back()}
           >
             {t('cancel')}
           </Button>

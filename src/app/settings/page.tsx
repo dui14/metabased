@@ -69,15 +69,31 @@ export default function SettingsPage() {
   };
 
   const uploadAvatar = async (file: File): Promise<string | null> => {
-    // TODO: Implement upload to Supabase Storage or other service
-    // For now, return the base64 preview (temporary solution)
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        resolve(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    });
+    try {
+      if (!user?.id) {
+        return null;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('userId', user.id);
+      formData.append('bucket', 'avatars');
+
+      const response = await fetch('/api/upload?bucket=avatars', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to upload avatar');
+      }
+
+      return data.url || null;
+    } catch (error) {
+      console.error('Avatar upload error:', error);
+      return null;
+    }
   };
 
   const handleSaveProfile = async () => {
