@@ -167,11 +167,19 @@ export async function POST(request: NextRequest) {
             });
           } else {
             // Lấy conversation để tìm group_id
-            const convResult = await query(
-              `SELECT group_id FROM conversations WHERE id = $1`,
-              [conversation_id]
-            );
-            const groupId = convResult.rows[0]?.group_id;
+            let groupId: string | null = null;
+            try {
+              const convResult = await query(
+                `SELECT group_id FROM conversations WHERE id = $1`,
+                [conversation_id]
+              );
+              groupId = convResult.rows[0]?.group_id || null;
+            } catch (convError) {
+              const err = convError as { code?: string };
+              if (err.code !== '42703') {
+                throw convError;
+              }
+            }
             if (groupId) {
               const membersResult = await query(
                 `SELECT user_id FROM chat_group_members WHERE group_id = $1 AND user_id != $2`,
@@ -324,11 +332,19 @@ export async function PATCH(request: NextRequest) {
       const query = await getLocalDbQuery();
 
       // Kiểm tra conversation type
-      const convResult = await query(
-        `SELECT type FROM conversations WHERE id = $1`,
-        [conversation_id]
-      );
-      const convType = convResult.rows[0]?.type || 'direct';
+      let convType: 'group' | 'direct' = 'direct';
+      try {
+        const convResult = await query(
+          `SELECT group_id FROM conversations WHERE id = $1`,
+          [conversation_id]
+        );
+        convType = convResult.rows[0]?.group_id ? 'group' : 'direct';
+      } catch (convError) {
+        const err = convError as { code?: string };
+        if (err.code !== '42703') {
+          throw convError;
+        }
+      }
 
       if (convType === 'group') {
         // Group: insert read receipt vào message_read_status cho tất cả tin nhắn chưa đọc

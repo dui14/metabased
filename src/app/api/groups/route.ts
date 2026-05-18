@@ -58,11 +58,23 @@ export async function POST(request: NextRequest) {
 
         // 3. Tạo conversation type='group' liên kết với group
         // participant_2_id = NULL vì group không có cặp participant cố định
-        const convResult = await client.query(
-          `INSERT INTO conversations (participant_1_id, participant_2_id, type, group_id)
-           VALUES ($1, NULL, 'group', $2) RETURNING *`,
-          [created_by, group.id]
-        );
+        let convResult;
+        try {
+          convResult = await client.query(
+            `INSERT INTO conversations (participant_1_id, participant_2_id, type, group_id)
+             VALUES ($1, NULL, 'group', $2) RETURNING *`,
+            [created_by, group.id]
+          );
+        } catch (insertConvError: any) {
+          if (insertConvError?.code !== '42703') {
+            throw insertConvError;
+          }
+          convResult = await client.query(
+            `INSERT INTO conversations (participant_1_id, participant_2_id, group_id)
+             VALUES ($1, NULL, $2) RETURNING *`,
+            [created_by, group.id]
+          );
+        }
 
         await client.query('COMMIT');
 
@@ -148,7 +160,7 @@ export async function GET(request: NextRequest) {
            ) as member_count
          FROM chat_groups g
          JOIN chat_group_members gm ON gm.group_id = g.id
-         LEFT JOIN conversations c ON c.group_id = g.id AND c.type = 'group'
+         LEFT JOIN conversations c ON c.group_id = g.id
          WHERE gm.user_id = $1
          ORDER BY c.last_message_at DESC NULLS LAST, g.created_at DESC`,
         [userId]

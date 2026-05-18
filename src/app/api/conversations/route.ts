@@ -25,43 +25,87 @@ export async function GET(request: NextRequest) {
 
     if (useLocalDb) {
       const query = await getLocalDbQuery();
-      
-      const result = await query(`
-        SELECT 
-          c.*,
-          COALESCE(c.type, 'direct') as type,
-          CASE 
-            WHEN c.participant_1_id = $1 THEN u2.id
-            ELSE u1.id
-          END as other_user_id,
-          CASE 
-            WHEN c.participant_1_id = $1 THEN u2.username
-            ELSE u1.username
-          END as other_username,
-          CASE 
-            WHEN c.participant_1_id = $1 THEN u2.display_name
-            ELSE u1.display_name
-          END as other_display_name,
-          CASE 
-            WHEN c.participant_1_id = $1 THEN u2.avatar_url
-            ELSE u1.avatar_url
-          END as other_avatar_url,
-          (
-            SELECT COUNT(*)::int 
-            FROM messages m 
-            WHERE m.conversation_id = c.id 
-              AND m.receiver_id = $1 
-              AND m.is_read = false
-          ) as unread_count
-        FROM conversations c
-        JOIN users u1 ON c.participant_1_id = u1.id
-        JOIN users u2 ON c.participant_2_id = u2.id
-        WHERE (c.participant_1_id = $1 OR c.participant_2_id = $1)
-          AND COALESCE(c.type, 'direct') = 'direct'
-        ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
-      `, [userId]);
 
-      return NextResponse.json({ conversations: result.rows });
+      try {
+        const result = await query(`
+          SELECT 
+            c.*,
+            CASE WHEN c.group_id IS NULL THEN 'direct' ELSE 'group' END as type,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.id
+              ELSE u1.id
+            END as other_user_id,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.username
+              ELSE u1.username
+            END as other_username,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.display_name
+              ELSE u1.display_name
+            END as other_display_name,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.avatar_url
+              ELSE u1.avatar_url
+            END as other_avatar_url,
+            (
+              SELECT COUNT(*)::int 
+              FROM messages m 
+              WHERE m.conversation_id = c.id 
+                AND m.receiver_id = $1 
+                AND m.is_read = false
+            ) as unread_count
+          FROM conversations c
+          JOIN users u1 ON c.participant_1_id = u1.id
+          JOIN users u2 ON c.participant_2_id = u2.id
+          WHERE (c.participant_1_id = $1 OR c.participant_2_id = $1)
+            AND c.group_id IS NULL
+          ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
+        `, [userId]);
+
+        return NextResponse.json({ conversations: result.rows });
+      } catch (error) {
+        const err = error as { code?: string };
+        if (err.code !== '42703') {
+          throw error;
+        }
+
+        // Legacy schema fallback: no group_id/type, treat all conversations as direct.
+        const fallbackResult = await query(`
+          SELECT 
+            c.*,
+            'direct' as type,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.id
+              ELSE u1.id
+            END as other_user_id,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.username
+              ELSE u1.username
+            END as other_username,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.display_name
+              ELSE u1.display_name
+            END as other_display_name,
+            CASE 
+              WHEN c.participant_1_id = $1 THEN u2.avatar_url
+              ELSE u1.avatar_url
+            END as other_avatar_url,
+            (
+              SELECT COUNT(*)::int 
+              FROM messages m 
+              WHERE m.conversation_id = c.id 
+                AND m.receiver_id = $1 
+                AND m.is_read = false
+            ) as unread_count
+          FROM conversations c
+          JOIN users u1 ON c.participant_1_id = u1.id
+          JOIN users u2 ON c.participant_2_id = u2.id
+          WHERE (c.participant_1_id = $1 OR c.participant_2_id = $1)
+          ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
+        `, [userId]);
+
+        return NextResponse.json({ conversations: fallbackResult.rows });
+      }
     }
 
 

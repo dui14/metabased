@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const MARKETPLACE_ABI = [
-  'function listings(uint256) view returns (uint256 id, address seller, address nftContract, uint256 tokenId, uint256 quantity, uint256 remainingQuantity, uint256 pricePerItem, bool isErc1155, bool isActive)',
+  'function listings(uint256) view returns (uint256 id, address seller, address nftContract, uint256 tokenId, uint256 quantity, uint256 remainingQuantity, uint256 pricePerItem, bool isErc1155, bool isActive, uint256 expiresAt, uint8 status)',
 ];
 
 function toSafeNumber(value: bigint): number {
@@ -50,8 +50,23 @@ export async function GET(
 
     const quantity = toSafeNumber(listing.quantity);
     const remainingQuantity = toSafeNumber(listing.remainingQuantity);
+    const expiresAt = toSafeNumber(listing.expiresAt);
+    const statusValue = Number(listing.status ?? 0);
+    const statusMap: Record<number, string> = {
+      0: 'active',
+      1: 'sold_out',
+      2: 'cancelled',
+      3: 'expired',
+    };
+    const rawStatus = statusMap[statusValue] || 'unknown';
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredByTime = expiresAt > 0 && nowSeconds >= expiresAt;
+    const resolvedStatus = rawStatus === 'active' && expiredByTime ? 'expired' : rawStatus;
+    const isExpired = resolvedStatus === 'expired';
+    const isCancelled = resolvedStatus === 'cancelled';
+    const isSoldOut = resolvedStatus === 'sold_out' || (resolvedStatus === 'unknown' && remainingQuantity <= 0);
     const isActive = Boolean(listing.isActive);
-    const isSoldOut = remainingQuantity <= 0 || !isActive;
+    const isBuyable = isActive && !isExpired && !isCancelled && !isSoldOut;
 
     return NextResponse.json(
       {
@@ -68,6 +83,12 @@ export async function GET(
           is_erc1155: Boolean(listing.isErc1155),
           is_active: isActive,
           is_sold_out: isSoldOut,
+          is_cancelled: isCancelled,
+          is_expired: isExpired,
+          is_buyable: isBuyable,
+          status: resolvedStatus,
+          expires_at: expiresAt,
+          expires_at_raw: listing.expiresAt?.toString?.() || '0',
         },
       },
       {
